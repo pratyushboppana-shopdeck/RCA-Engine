@@ -260,11 +260,16 @@ def _get_card_cache(card_id):
 
 
 def refresh_all():
-    """Force-refresh every card (used by snapshot.py and /api/refresh)."""
+    """Force-refresh every card (used by snapshot.py and /api/refresh).
+    Resilient: a per-card failure (e.g. BigQuery quota) is recorded, not fatal,
+    so the cheaper cards still refresh and any prior snapshot is preserved."""
     out = {}
     for cid in CARDS:
-        with _bulk_locks[cid]:
-            out[cid] = _refresh_card(cid)
+        try:
+            with _bulk_locks[cid]:
+                out[cid] = _refresh_card(cid)
+        except Exception as e:
+            out[cid] = f"error: {str(e)[:120]}"
     return out
 
 
