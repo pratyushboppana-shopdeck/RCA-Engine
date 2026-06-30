@@ -19,6 +19,7 @@ Run:
   uvicorn app:app --reload --port 8000
 """
 import os, json, time, threading, urllib.request, urllib.error
+from datetime import date, timedelta
 try:
     from dotenv import load_dotenv
     load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=True)
@@ -44,7 +45,25 @@ MAPPING_CARD  = 7753
 BUSINESS_CARD = 10353
 BUSINESS_BACKUP_CARD = 10352   # lighter Category Intelligence card — website/company/contact backup
 CATEGORY_CARD = 10362
-CARDS = (MAPPING_CARD, BUSINESS_CARD, BUSINESS_BACKUP_CARD, CATEGORY_CARD)
+METRICS_CARD  = 10773   # daily spend/CPM/CTR/s_gmv time series (all HIT sellers, no params)
+CARDS = (MAPPING_CARD, BUSINESS_CARD, BUSINESS_BACKUP_CARD, CATEGORY_CARD, METRICS_CARD)
+METRICS_KEEP_DAYS = 45  # trim each seller's series to the last N rows in the cache
+
+# Change Log dashboard 96 — per-seller, date-ranged change events (db 2, cheap).
+# (dashcard_id, card_id, area-label). Skips the noisy order-processing seller-level log.
+CHANGELOG_DASHBOARD = 96
+CHANGELOG_PARAM = {"seller": "fff2e0d8", "start": "6e08655a", "end": "b8faecc6"}
+CHANGELOG_DASHCARDS = [
+    (815, 785,  "Coupon"),
+    (816, 787,  "Meta marketing"),
+    (817, 792,  "Payment"),
+    (818, 790,  "Product page"),
+    (820, 791,  "Shipping"),
+    (821, 788,  "Website"),
+    (822, 793,  "Catalogue"),
+    (825, 786,  "Communication & catalogue settings"),
+    (3512, 5185, "Google marketing"),
+]
 BUSINESS_SELLER_PARAM_ID = "a45e1c84-6dc1-42fc-93da-79f43ee84255"  # card 10353
 CATEGORY_SELLER_PARAM_ID = "232ba3d0-4861-4ebd-8775-5f8b9d488737"  # card 10362
 
@@ -146,9 +165,60 @@ def _disk_write(card_id, by_id, ts):
 
 
 def _pull_card_all(card_id):
-    """Run the card with NO seller filter -> all sellers in one scan, indexed by id."""
+    """Run the card with NO seller filter -> all sellers in one scan, indexed by id.
+    The metrics card (10773) is a time series, so group rows into a per-seller list."""
     rows = _mb(f"/api/card/{card_id}/query/json", "POST", {})
+    if card_id == METRICS_CARD:
+        from collections import defaultdict as _dd
+        g = _dd(list)
+        for r in rows:
+            if isinstance(r, dict) and r.get("seller_id"):
+                g[str(r["seller_id"])].append(r)
+        out = {}
+        for sid, lst in g.items():
+            lst.sort(key=lambda x: str(x.get("date") or ""))
+            out[sid] = lst[-METRICS_KEEP_DAYS:]
+        return out
     return {str(r["seller_id"]): r for r in rows if isinstance(r, dict) and r.get("seller_id")}
+
+
+def _get_changelog(seller_id, start, end):
+    """Fetch per-seller change events from dashboard 96 (db 2, cheap) for a date range."""
+    params = [
+        {"id": CHANGELOG_PARAM["seller"], "value": str(seller_id)},
+        {"id": CHANGELOG_PARAM["start"], "value": start},
+        {"id": CHANGELOG_PARAM["end"], "value": end},
+    ]
+    events = []
+    for dcid, cid, area in CHANGELOG_DASHCARDS:
+        try:
+            rows = _mb(f"/api/dashboard/{CHANGELOG_DASHBOARD}/dashcard/{dcid}/card/{cid}/query/json",
+                       "POST", {"parameters": params})
+        except HTTPException:
+            continue
+        for r in rows if isinstance(rows, list) else []:
+            who = " ".join(x for x in [r.get("first_name"), r.get("last_name")] if x).strip() \
+                  or r.get("changed_by") or r.get("user_email")
+            events.append({
+                "date": (r.get("createdat") or r.get("change_date_time") or "")[:19],
+                "area": area,
+                "category": _clean(r.get("category")),
+                "field": _clean(r.get("field_name") or r.get("changed_fields")),
+                "from": _clean(r.get("initial_value") or r.get("old_resource")),
+                "to": _clean(r.get("new_value") or r.get("new_resource")),
+                "by": _clean(who),
+                "user_type": _clean(r.get("user_type")),
+            })
+    events.sort(key=lambda e: e["date"], reverse=True)
+    # cap per area so one bulk edit (e.g. catalogue) doesn't crowd out other change types
+    per_area, kept = {}, []
+    for e in events:
+        a = e["area"]
+        per_area[a] = per_area.get(a, 0) + 1
+        if per_area[a] <= 25:
+            kept.append(e)
+    kept.sort(key=lambda e: e["date"], reverse=True)
+    return kept[:150]
 
 
 def _refresh_card(card_id):
@@ -222,6 +292,8 @@ app.add_middleware(
 class SellerReq(BaseModel):
     seller_id: str
     mode: str = "hits"
+    start_date: str = ""   # YYYY-MM-DD; default = 30 days ago
+    end_date: str = ""     # YYYY-MM-DD; default = today
 
 
 class CsvFile(BaseModel):
@@ -301,7 +373,25 @@ def seller(req: SellerReq):
     b   = lookup(BUSINESS_CARD)
     b2  = lookup(BUSINESS_BACKUP_CARD)   # backup for website/company/contact/offers
     cat = lookup(CATEGORY_CARD)
-    if not m and not b and not b2 and not cat:
+
+    # date range (default last 30 days)
+    end = (req.end_date or date.today().isoformat())[:10]
+    start = (req.start_date or (date.today() - timedelta(days=30)).isoformat())[:10]
+
+    # daily metrics (10773) from cache, sliced to range
+    try:
+        series = _get_card_cache(METRICS_CARD).get(sid) or []
+    except HTTPException:
+        series = []
+    daily_metrics = [r for r in series if start <= str(r.get("date", ""))[:10] <= end] or series[-30:]
+
+    # changelog (dashboard 96, db2 — live, cheap) for the range
+    try:
+        changelog = _get_changelog(sid, start, end)
+    except Exception:
+        changelog = []
+
+    if not m and not b and not b2 and not cat and not daily_metrics and not changelog:
         raise HTTPException(404, f"No data found for seller_id '{sid}'")
 
     mapping = {
@@ -356,6 +446,9 @@ def seller(req: SellerReq):
         "business": business,
         "category": category,
         "benchmark": benchmark,
+        "range": {"start": start, "end": end},
+        "daily_metrics": daily_metrics,
+        "changelog": changelog,
     }
 
 
@@ -418,19 +511,29 @@ def plan(req: PlanReq):
 
     sys_prompt = (
         "You are a senior Meta (Facebook/Instagram) performance-marketing strategist for an "
-        "Indian D2C marketplace's growth team. You are given a seller's account context, their "
+        "Indian D2C marketplace's growth team. You are given a seller's account context (which "
+        "includes a DAILY METRICS time series and a CHANGELOG of recent setting changes), their "
         "P&L data, their Meta ad-account metrics, and their website. ANALYSE THE DATA DEEPLY "
         "before recommending anything:\n"
         "- From the P&L: read revenue, COGS, gross/contribution margin, marketing spend, RTO/returns, "
         "shipping, net profit/loss. Identify what is bleeding money and the break-even ROAS.\n"
         "- From the Meta metrics: read spend, ROAS, CTR, CPM, CPC, CPP, AOV, frequency, conversion rate "
         "by campaign/ad set/creative. Find the winners, the wasted spend, and the funnel bottleneck.\n"
+        "- From daily_metrics (date, spend, cpm, ctr, s_gmv, orders, gmv): detect any DROP or SPIKE — "
+        "e.g. CTR falling, CPM rising, spend/gmv (s_gmv) worsening — and note the date it started.\n"
+        "- From changelog (dated setting changes — website, catalogue, coupon, shipping, meta/google "
+        "settings, payment, product page): for each performance drop, CORRELATE it with changes made "
+        "right before that date and FLAG the suspected cause (e.g. 'CTR dropped 40% on 14 Jun, one day "
+        "after a Website NavigationBar change on 13 Jun — likely culprit, revert/test'). Be explicit "
+        "about the correlation and your confidence; say so if there's no clear link.\n"
         "- Cross-reference: is the Meta ROAS above the P&L break-even ROAS? Are margins enough to scale?\n"
         "- Consider the website as the conversion surface.\n"
         "Then produce a concrete, prioritized next-plan-of-action. Every action must be specific and "
-        "cite the actual numbers/observations that justify it (e.g. 'COGS is 47% so break-even ROAS is "
-        "~2.1x, but campaign X runs at 1.4x — cut it'). Return 3-6 actions per category. "
-        "Priority 'high' = money-losing blocker, 'med' = clear lever, 'low' = nice-to-have."
+        "cite the actual numbers/dates/changes that justify it (e.g. 'COGS is 47% so break-even ROAS is "
+        "~2.1x, but campaign X runs at 1.4x — cut it'). Lead with any change-caused-drop fixes. "
+        "Return 3-6 actions per category. "
+        "Priority 'high' = money-losing blocker or a change that caused a drop, 'med' = clear lever, "
+        "'low' = nice-to-have."
     )
     user_prompt = (
         f"Seller track: {track}.\n"
