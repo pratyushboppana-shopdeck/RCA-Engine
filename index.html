@@ -4,455 +4,582 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Meta Account Troubleshoot</title>
+<meta name="description" content="Live diagnostics + AI next-plan-of-action for seller accounts." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Sora:wght@600;700;800&display=swap" rel="stylesheet" />
 <style>
   :root{
-    --bg:#0b0f1a;
-    --bg-2:#0f1525;
-    --panel:#141b2e;
-    --panel-2:#1a2238;
-    --line:#26304a;
-    --txt:#e8edf7;
-    --muted:#94a0bd;
-    --brand:#5b7cff;
-    --brand-2:#7c5bff;
-    --green:#2dd4a7;
-    --amber:#f5b14c;
-    --red:#ff6b6b;
-    --hits:#5b7cff;
-    --growth:#2dd4a7;
-    --radius:16px;
-    --shadow:0 20px 50px -20px rgba(0,0,0,.6);
+    /* semantic tokens */
+    --bg:#0a0d16;
+    --bg-grad-1:rgba(99,102,241,.16);
+    --bg-grad-2:rgba(139,92,246,.14);
+    --surface:#111524;
+    --surface-2:#161b2e;
+    --surface-3:#1c2236;
+    --line:#262d44;
+    --line-strong:#333c5a;
+    --txt:#eef1f8;
+    --txt-2:#aab3cc;
+    --txt-3:#7e88a6;
+    --primary:#6366f1;
+    --primary-2:#8b5cf6;
+    --primary-soft:rgba(99,102,241,.14);
+    --ok:#34d399;
+    --warn:#fbbf24;
+    --bad:#fb7185;
+    --hits:#6366f1;
+    --growth:#34d399;
+    --r-sm:10px; --r:14px; --r-lg:20px;
+    --sp:8px;
+    --shadow:0 24px 60px -28px rgba(0,0,0,.7);
+    --shadow-sm:0 8px 24px -14px rgba(0,0,0,.6);
+    --ease:cubic-bezier(.22,.61,.36,1);
+    --fast:.16s; --med:.26s;
   }
   *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
   body{
-    font-family:'Inter',system-ui,sans-serif;
-    background:
-      radial-gradient(1200px 600px at 80% -10%, rgba(124,91,255,.18), transparent 60%),
-      radial-gradient(1000px 500px at -10% 10%, rgba(91,124,255,.16), transparent 55%),
-      var(--bg);
+    font-family:'Inter',system-ui,-apple-system,sans-serif;
     color:var(--txt);
-    min-height:100vh;
+    background:
+      radial-gradient(900px 520px at 85% -8%, var(--bg-grad-2), transparent 60%),
+      radial-gradient(820px 480px at -8% 4%, var(--bg-grad-1), transparent 58%),
+      var(--bg);
+    min-height:100dvh;
     -webkit-font-smoothing:antialiased;
+    font-feature-settings:"cv05","ss01";
   }
-  .wrap{max-width:1120px;margin:0 auto;padding:28px 22px 80px}
-  h1,h2,h3,.brand{font-family:'Plus Jakarta Sans',sans-serif}
+  h1,h2,h3,.brand-name{font-family:'Sora',sans-serif;letter-spacing:-.02em}
+  .tnum{font-variant-numeric:tabular-nums}
+  a{color:inherit}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 20px 96px}
+  :focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:6px}
+  svg{display:block}
+  .icon{width:20px;height:20px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
+  .icon-sm{width:16px;height:16px}
 
-  /* Header */
-  header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:36px}
-  .brand{display:flex;align-items:center;gap:12px;font-weight:800;font-size:18px;letter-spacing:-.02em}
-  .logo{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,var(--brand),var(--brand-2));display:grid;place-items:center;font-size:20px;box-shadow:0 8px 20px -6px rgba(91,124,255,.6)}
-  .badge{font-size:12px;color:var(--muted);border:1px solid var(--line);padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.02)}
+  /* ---------- header ---------- */
+  header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:40px}
+  .brand{display:flex;align-items:center;gap:12px}
+  .brand-mark{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,var(--primary),var(--primary-2));display:grid;place-items:center;box-shadow:0 10px 24px -8px rgba(99,102,241,.7);color:#fff}
+  .brand-name{font-weight:800;font-size:17px}
+  .brand-sub{font-size:11.5px;color:var(--txt-3);margin-top:1px}
+  .pillbadge{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--txt-2);border:1px solid var(--line);padding:7px 13px;border-radius:999px;background:rgba(255,255,255,.02)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(52,211,153,.18)}
 
-  /* Hero */
-  .hero{text-align:center;margin-bottom:34px}
-  .hero h1{font-size:clamp(28px,4vw,42px);font-weight:800;letter-spacing:-.03em;line-height:1.1}
-  .hero h1 span{background:linear-gradient(120deg,var(--brand),var(--brand-2),var(--green));-webkit-background-clip:text;background-clip:text;color:transparent}
-  .hero p{color:var(--muted);margin-top:12px;font-size:15px;max-width:620px;margin-left:auto;margin-right:auto}
+  /* ---------- hero ---------- */
+  .hero{text-align:center;margin-bottom:36px;animation:rise .5s var(--ease) both}
+  .eyebrow{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--primary);background:var(--primary-soft);border:1px solid rgba(99,102,241,.28);padding:6px 13px;border-radius:999px;margin-bottom:18px}
+  .hero h1{font-size:clamp(27px,4.2vw,42px);font-weight:800;line-height:1.08}
+  .hero h1 .grad{background:linear-gradient(110deg,var(--primary),var(--primary-2) 55%,var(--ok));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero p{color:var(--txt-2);margin-top:14px;font-size:15px;line-height:1.6;max-width:600px;margin-inline:auto}
 
-  /* Mode cards */
-  .modes{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:8px}
-  @media(max-width:680px){.modes{grid-template-columns:1fr}}
-  .mode-card{
-    position:relative;cursor:pointer;border:1px solid var(--line);background:linear-gradient(180deg,var(--panel),var(--bg-2));
-    border-radius:var(--radius);padding:26px;transition:.18s;overflow:hidden;
+  /* ---------- mode cards ---------- */
+  .modes{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:640px){.modes{grid-template-columns:1fr}}
+  .mode{
+    position:relative;text-align:left;cursor:pointer;border:1px solid var(--line);
+    background:linear-gradient(180deg,var(--surface),var(--bg));border-radius:var(--r-lg);
+    padding:26px;transition:transform var(--med) var(--ease),border-color var(--fast),box-shadow var(--med);
+    color:inherit;font:inherit;animation:rise .55s var(--ease) both;
   }
-  .mode-card:hover{transform:translateY(-3px);border-color:var(--brand);box-shadow:var(--shadow)}
-  .mode-card.active{border-color:var(--brand);box-shadow:0 0 0 1px var(--brand) inset,var(--shadow)}
-  .mode-card .ico{width:48px;height:48px;border-radius:13px;display:grid;place-items:center;font-size:24px;margin-bottom:16px}
-  .mode-card.hits .ico{background:rgba(91,124,255,.14);border:1px solid rgba(91,124,255,.3)}
-  .mode-card.growth .ico{background:rgba(45,212,167,.14);border:1px solid rgba(45,212,167,.3)}
-  .mode-card h3{font-size:19px;font-weight:700}
-  .mode-card p{color:var(--muted);font-size:13.5px;margin-top:6px;line-height:1.5}
-  .mode-card .tag{position:absolute;top:18px;right:18px;font-size:11px;font-weight:600;color:var(--muted);border:1px solid var(--line);padding:4px 10px;border-radius:999px}
+  .mode:nth-child(2){animation-delay:.07s}
+  .mode::after{content:"";position:absolute;inset:0;border-radius:inherit;padding:1px;background:linear-gradient(135deg,transparent,transparent);-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:0;transition:opacity var(--med)}
+  .mode:hover{transform:translateY(-4px);border-color:var(--line-strong);box-shadow:var(--shadow)}
+  .mode:hover::after{opacity:1;background:linear-gradient(135deg,var(--primary),var(--primary-2))}
+  .mode:active{transform:translateY(-1px)}
+  .mode .top{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px}
+  .mode .ic{width:46px;height:46px;border-radius:13px;display:grid;place-items:center}
+  .mode.hits .ic{background:rgba(99,102,241,.13);border:1px solid rgba(99,102,241,.32);color:#a5b4fc}
+  .mode.growth .ic{background:rgba(52,211,153,.12);border:1px solid rgba(52,211,153,.3);color:#6ee7b7}
+  .mode .tag{font-size:11px;font-weight:600;color:var(--txt-3);border:1px solid var(--line);padding:4px 10px;border-radius:999px}
+  .mode h3{font-size:19px;font-weight:700}
+  .mode p{color:var(--txt-2);font-size:13.5px;margin-top:7px;line-height:1.55}
+  .mode .go{display:inline-flex;align-items:center;gap:6px;margin-top:16px;font-size:13px;font-weight:600;color:var(--primary)}
+  .mode .go .icon{transition:transform var(--fast)}
+  .mode:hover .go .icon{transform:translateX(3px)}
 
-  /* Workspace */
-  .workspace{display:none;margin-top:26px}
-  .workspace.show{display:block;animation:fade .3s ease}
-  @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  /* ---------- workspace ---------- */
+  .view{display:none}
+  .view.show{display:block}
+  #ws.show{animation:rise .4s var(--ease) both}
+  .wsbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+  .crumb{display:flex;align-items:center;gap:10px}
+  .chip{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;padding:7px 13px;border-radius:999px;border:1px solid var(--line)}
+  .chip.hits{color:#a5b4fc;background:rgba(99,102,241,.1);border-color:rgba(99,102,241,.3)}
+  .chip.growth{color:#6ee7b7;background:rgba(52,211,153,.1);border-color:rgba(52,211,153,.3)}
+  .back{display:inline-flex;align-items:center;gap:7px;background:transparent;border:1px solid var(--line);color:var(--txt-2);padding:9px 14px;border-radius:var(--r-sm);cursor:pointer;font:inherit;font-size:13px;font-weight:500;transition:var(--fast)}
+  .back:hover{color:var(--txt);border-color:var(--line-strong);background:var(--surface-2)}
 
-  .wkhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px;flex-wrap:wrap}
-  .wkhead .left{display:flex;align-items:center;gap:12px}
-  .pill{font-size:13px;font-weight:600;padding:7px 14px;border-radius:999px;border:1px solid var(--line)}
-  .pill.hits{color:var(--hits);background:rgba(91,124,255,.1);border-color:rgba(91,124,255,.3)}
-  .pill.growth{color:var(--growth);background:rgba(45,212,167,.1);border-color:rgba(45,212,167,.3)}
-  .btn-ghost{background:transparent;border:1px solid var(--line);color:var(--muted);padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:500;transition:.15s}
-  .btn-ghost:hover{color:var(--txt);border-color:var(--brand)}
+  .card{background:linear-gradient(180deg,var(--surface),var(--bg));border:1px solid var(--line);border-radius:var(--r-lg);padding:22px}
+  .card + .card{margin-top:16px}
+  .label{display:flex;align-items:center;gap:8px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--txt-3);font-weight:600;margin-bottom:14px}
 
-  .card{background:linear-gradient(180deg,var(--panel),var(--bg-2));border:1px solid var(--line);border-radius:var(--radius);padding:22px}
-
-  /* Search */
-  .search-row{display:flex;gap:12px;flex-wrap:wrap}
-  .search-row input{
-    flex:1;min-width:220px;background:var(--bg);border:1px solid var(--line);color:var(--txt);
-    padding:14px 16px;border-radius:12px;font-size:15px;outline:none;transition:.15s;font-family:inherit;
+  /* ---------- search ---------- */
+  .search{display:flex;gap:10px;flex-wrap:wrap}
+  .field{flex:1;min-width:220px;position:relative;display:flex;align-items:center}
+  .field .icon{position:absolute;left:14px;color:var(--txt-3);pointer-events:none}
+  .field input{
+    width:100%;background:var(--bg);border:1px solid var(--line);color:var(--txt);
+    padding:14px 16px 14px 44px;border-radius:var(--r);font-size:15px;outline:none;font-family:inherit;
+    transition:border-color var(--fast),box-shadow var(--fast);
   }
-  .search-row input:focus{border-color:var(--brand);box-shadow:0 0 0 3px rgba(91,124,255,.18)}
+  .field input::placeholder{color:var(--txt-3)}
+  .field input:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-soft)}
   .btn{
-    border:none;cursor:pointer;font-weight:600;font-size:14px;padding:14px 22px;border-radius:12px;
-    background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;transition:.15s;white-space:nowrap;
-    box-shadow:0 10px 24px -10px rgba(91,124,255,.7);
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;border:none;cursor:pointer;
+    font:inherit;font-weight:600;font-size:14px;padding:14px 22px;border-radius:var(--r);white-space:nowrap;
+    background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;
+    box-shadow:0 12px 26px -12px rgba(99,102,241,.8);
+    transition:transform var(--fast) var(--ease),filter var(--fast),opacity var(--fast);
   }
   .btn:hover{filter:brightness(1.08);transform:translateY(-1px)}
-  .btn:disabled{opacity:.55;cursor:not-allowed;transform:none}
-  .hint{color:var(--muted);font-size:12.5px;margin-top:10px}
+  .btn:active{transform:translateY(0) scale(.99)}
+  .btn:disabled{opacity:.55;cursor:not-allowed;transform:none;filter:none}
+  .helper{color:var(--txt-3);font-size:12.5px;margin-top:11px;display:flex;align-items:center;gap:7px}
 
-  /* Loading */
-  .loader{display:none;align-items:center;gap:12px;color:var(--muted);font-size:14px;margin-top:22px}
-  .loader.show{display:flex}
-  .spin{width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--brand);border-radius:50%;animation:rot .7s linear infinite}
-  @keyframes rot{to{transform:rotate(360deg)}}
+  /* ---------- skeleton ---------- */
+  .sk{position:relative;overflow:hidden;background:var(--surface-2);border-radius:8px}
+  .sk::after{content:"";position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);animation:shimmer 1.3s infinite}
+  @media(prefers-reduced-motion:reduce){.sk::after{animation:none}}
 
-  /* Results */
-  .results{display:none;margin-top:24px}
-  .results.show{display:block;animation:fade .3s ease}
-  .section-title{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:600;margin:0 0 14px}
+  /* ---------- results ---------- */
+  #results{margin-top:22px}
+  .reveal{animation:rise .4s var(--ease) both}
+  .sellerhead{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .avatar{width:54px;height:54px;border-radius:15px;background:linear-gradient(135deg,var(--primary),var(--primary-2));display:grid;place-items:center;font-family:'Sora';font-weight:800;font-size:22px;color:#fff;flex-shrink:0}
+  .sellerhead h2{font-size:21px;font-weight:700}
+  .sellerhead .meta{font-size:13px;color:var(--txt-2);margin-top:4px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .sellerhead .meta a{color:var(--primary);text-decoration:none;display:inline-flex;align-items:center;gap:5px}
+  .sellerhead .meta a:hover{text-decoration:underline}
+  .status{margin-left:auto;display:inline-flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;padding:8px 14px;border-radius:999px}
+  .s-ok{background:rgba(52,211,153,.13);color:var(--ok);border:1px solid rgba(52,211,153,.3)}
+  .s-warn{background:rgba(251,191,36,.13);color:var(--warn);border:1px solid rgba(251,191,36,.3)}
+  .s-bad{background:rgba(251,113,133,.13);color:var(--bad);border:1px solid rgba(251,113,133,.3)}
 
-  .seller-head{display:flex;align-items:center;gap:16px;margin-bottom:20px;flex-wrap:wrap}
-  .avatar{width:54px;height:54px;border-radius:14px;background:linear-gradient(135deg,var(--brand),var(--brand-2));display:grid;place-items:center;font-weight:800;font-size:22px}
-  .seller-head .meta h2{font-size:20px;font-weight:700}
-  .seller-head .meta .sub{color:var(--muted);font-size:13px;margin-top:3px}
-  .status-chip{margin-left:auto;font-size:12px;font-weight:600;padding:7px 13px;border-radius:999px}
-  .s-ok{background:rgba(45,212,167,.13);color:var(--green);border:1px solid rgba(45,212,167,.3)}
-  .s-warn{background:rgba(245,177,76,.13);color:var(--amber);border:1px solid rgba(245,177,76,.3)}
-  .s-bad{background:rgba(255,107,107,.13);color:var(--red);border:1px solid rgba(255,107,107,.3)}
+  .twocol{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:16px}
+  @media(max-width:760px){.twocol{grid-template-columns:1fr}}
 
-  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
-  @media(max-width:880px){.grid{grid-template-columns:repeat(2,1fr)}}
-  @media(max-width:460px){.grid{grid-template-columns:1fr}}
-  .kpi{background:var(--bg);border:1px solid var(--line);border-radius:13px;padding:16px}
-  .kpi .k{color:var(--muted);font-size:12px;font-weight:500}
-  .kpi .v{font-size:22px;font-weight:700;margin-top:6px;letter-spacing:-.02em}
-  .kpi .d{font-size:12px;margin-top:5px;font-weight:600}
-  .up{color:var(--green)} .down{color:var(--red)} .flat{color:var(--muted)}
+  /* team mapping */
+  .team{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:420px){.team{grid-template-columns:1fr}}
+  .person{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg);transition:border-color var(--fast)}
+  .person:hover{border-color:var(--line-strong)}
+  .person .pic{width:38px;height:38px;border-radius:10px;background:var(--surface-3);display:grid;place-items:center;font-weight:700;font-size:14px;color:var(--txt-2);flex-shrink:0}
+  .person .role{font-size:11px;color:var(--txt-3);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .person .name{font-size:14px;font-weight:600;margin-top:2px}
+  .person .name.empty{color:var(--txt-3);font-weight:400}
+  .extra{margin-top:14px}
+  .extra summary{cursor:pointer;font-size:13px;color:var(--txt-2);list-style:none;display:inline-flex;align-items:center;gap:7px;user-select:none}
+  .extra summary::-webkit-details-marker{display:none}
+  .extra summary .icon{transition:transform var(--fast)}
+  .extra[open] summary .icon{transform:rotate(90deg)}
+  .extra .team{margin-top:12px}
 
-  .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
-  @media(max-width:680px){.detail-grid{grid-template-columns:1fr}}
+  /* business KPIs */
+  .kpis{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .kpi{padding:14px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg)}
+  .kpi .k{font-size:12px;color:var(--txt-3);font-weight:500;display:flex;align-items:center;gap:6px}
+  .kpi .v{font-size:22px;font-weight:700;margin-top:7px;letter-spacing:-.02em}
   .kv{display:flex;justify-content:space-between;gap:14px;padding:11px 0;border-bottom:1px dashed var(--line);font-size:14px}
   .kv:last-child{border-bottom:none}
-  .kv .key{color:var(--muted)}
-  .kv .val{font-weight:600;text-align:right}
+  .kv .k{color:var(--txt-2)}
+  .kv .v{font-weight:600;text-align:right}
 
-  /* Plan */
-  .plan-cta{margin-top:26px;display:flex;justify-content:center}
-  .btn-lg{padding:16px 30px;font-size:15px;border-radius:14px}
-  .plan{display:none;margin-top:26px}
-  .plan.show{display:block;animation:fade .3s ease}
-
-  .tabs{display:flex;gap:8px;background:var(--bg);border:1px solid var(--line);padding:6px;border-radius:14px;margin-bottom:18px;flex-wrap:wrap}
-  .tab{flex:1;min-width:150px;text-align:center;padding:11px 14px;border-radius:10px;cursor:pointer;font-size:13.5px;font-weight:600;color:var(--muted);transition:.15s;border:none;background:transparent;font-family:inherit}
+  /* ---------- plan ---------- */
+  .plancta{display:flex;justify-content:center;margin-top:24px}
+  .btn-lg{padding:16px 28px;font-size:15px;border-radius:16px}
+  #plan{margin-top:22px}
+  .tabs{display:flex;gap:6px;background:var(--bg);border:1px solid var(--line);padding:6px;border-radius:var(--r);margin-bottom:18px;flex-wrap:wrap}
+  .tab{flex:1;min-width:140px;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 14px;border-radius:var(--r-sm);cursor:pointer;font:inherit;font-size:13.5px;font-weight:600;color:var(--txt-2);border:none;background:transparent;transition:color var(--fast),background var(--fast)}
   .tab:hover{color:var(--txt)}
-  .tab.active{background:linear-gradient(135deg,var(--brand),var(--brand-2));color:#fff;box-shadow:0 8px 18px -8px rgba(91,124,255,.7)}
-  .tabpane{display:none}
-  .tabpane.active{display:block;animation:fade .25s ease}
+  .tab[aria-selected="true"]{background:linear-gradient(135deg,var(--primary),var(--primary-2));color:#fff;box-shadow:0 10px 22px -12px rgba(99,102,241,.8)}
+  .pane{display:none}
+  .pane.show{display:block}
+  .action{display:flex;gap:14px;padding:16px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg);margin-bottom:11px;animation:rise .35s var(--ease) both}
+  .action .n{width:30px;height:30px;border-radius:9px;background:var(--primary-soft);border:1px solid rgba(99,102,241,.3);color:#a5b4fc;display:grid;place-items:center;font-weight:700;font-size:14px;flex-shrink:0}
+  .action h4{font-size:15px;font-weight:700}
+  .action p{color:var(--txt-2);font-size:13.5px;margin-top:5px;line-height:1.55}
+  .prio{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;margin-top:10px}
+  .p-high{background:rgba(251,113,133,.13);color:var(--bad)}
+  .p-med{background:rgba(251,191,36,.13);color:var(--warn)}
+  .p-low{background:rgba(52,211,153,.13);color:var(--ok)}
+  .prio i{width:6px;height:6px;border-radius:50%;background:currentColor;display:block}
 
-  .action{display:flex;gap:14px;padding:16px;border:1px solid var(--line);border-radius:13px;background:var(--bg);margin-bottom:12px}
-  .action .n{width:30px;height:30px;border-radius:9px;background:rgba(91,124,255,.14);border:1px solid rgba(91,124,255,.3);color:var(--brand);display:grid;place-items:center;font-weight:700;font-size:14px;flex-shrink:0}
-  .action .body h4{font-size:15px;font-weight:700}
-  .action .body p{color:var(--muted);font-size:13.5px;margin-top:5px;line-height:1.55}
-  .prio{display:inline-block;font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;margin-top:9px}
-  .p-high{background:rgba(255,107,107,.13);color:var(--red)}
-  .p-med{background:rgba(245,177,76,.13);color:var(--amber)}
-  .p-low{background:rgba(45,212,167,.13);color:var(--green)}
+  .empty{color:var(--txt-3);font-size:14px;text-align:center;padding:34px 16px;line-height:1.6}
+  .source-note{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;color:var(--txt-3);background:var(--surface-2);border:1px solid var(--line);padding:5px 11px;border-radius:999px;margin-top:14px}
+  .spin{width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--primary);border-radius:50%;animation:rot .7s linear infinite}
+  @media(prefers-reduced-motion:reduce){.spin{animation-duration:1.4s}}
 
-  .empty{color:var(--muted);font-size:14px;text-align:center;padding:30px}
+  footer{text-align:center;color:var(--txt-3);font-size:12.5px;margin-top:56px;line-height:1.7}
+  footer code{background:var(--surface-2);padding:2px 7px;border-radius:6px;font-size:11.5px;color:#a5b4fc}
 
-  footer{text-align:center;color:var(--muted);font-size:12.5px;margin-top:50px;line-height:1.6}
-  footer code{background:var(--panel-2);padding:2px 7px;border-radius:6px;font-size:11.5px;color:var(--brand)}
+  @keyframes rise{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+  @keyframes shimmer{to{transform:translateX(100%)}}
+  @keyframes rot{to{transform:rotate(360deg)}}
+  @media(prefers-reduced-motion:reduce){
+    *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+    html{scroll-behavior:auto}
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <div class="brand"><div class="logo">⚡</div> Meta Account Troubleshoot</div>
-    <div class="badge">Live Tool · v0.1</div>
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z"/></svg>
+      </div>
+      <div>
+        <div class="brand-name">Meta Account Troubleshoot</div>
+        <div class="brand-sub">Diagnostics &amp; AI plan of action</div>
+      </div>
+    </div>
+    <span class="pillbadge"><span class="dot" id="srcDot"></span><span id="srcText">Sample mode</span></span>
   </header>
 
-  <!-- HOME -->
-  <div id="home">
+  <!-- ============ HOME ============ -->
+  <section id="home" class="view show">
     <div class="hero">
-      <h1>Diagnose any seller, get a <span>next plan of action</span></h1>
-      <p>Pick a track, drop in a Seller ID, and pull the full account picture — then generate a strategy across website, campaign, and out-of-the-box plays.</p>
+      <span class="eyebrow">
+        <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        Live seller diagnostics
+      </span>
+      <h1>Diagnose any seller, get a<br/><span class="grad">next plan of action</span></h1>
+      <p>Pick a track, drop in a Seller ID to pull the live account picture — team mapping and business details — then generate an AI strategy across website, campaign, and out-of-the-box plays.</p>
     </div>
 
     <div class="modes">
-      <div class="mode-card hits" data-mode="hits" onclick="openMode('hits')">
-        <span class="tag">Track 1</span>
-        <div class="ico">🚀</div>
+      <button class="mode hits" onclick="openMode('hits')" aria-label="Open HITS Troubleshoot">
+        <div class="top">
+          <div class="ic"><svg class="icon" viewBox="0 0 24 24"><path d="M4.5 16.5c-1.5 1.3-2 5-2 5s3.7-.5 5-2c.7-.8.7-2 0-2.8a2 2 0 0 0-3 0Z"/><path d="m12 15-3-3a22 22 0 0 1 8-10c2 0 4 2 4 4a22 22 0 0 1-10 8Z"/><path d="M9 12H4s.6-3.3 2-4c1.6-.8 5 0 5 0"/><path d="M12 15v5s3.3-.6 4-2c.8-1.6 0-5 0-5"/></svg></div>
+          <span class="tag">Track 1</span>
+        </div>
         <h3>HITS Troubleshoot</h3>
-        <p>For HITS-managed accounts. Deep diagnostics on spend, ROAS and funnel health with HITS-specific playbooks.</p>
-      </div>
-      <div class="mode-card growth" data-mode="growth" onclick="openMode('growth')">
-        <span class="tag">Track 2</span>
-        <div class="ico">📈</div>
+        <p>For HITS-managed accounts. Deep diagnostics with HITS-specific playbooks for spend, ROAS and funnel health.</p>
+        <span class="go">Open track <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></span>
+      </button>
+      <button class="mode growth" onclick="openMode('growth')" aria-label="Open 1k to 5k Troubleshoot">
+        <div class="top">
+          <div class="ic"><svg class="icon" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-4 4"/></svg></div>
+          <span class="tag">Track 2</span>
+        </div>
         <h3>1k–5k Troubleshoot</h3>
         <p>For sellers in the 1k–5k weekly spend band. Scale-up diagnostics and growth-unlock recommendations.</p>
-      </div>
+        <span class="go">Open track <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></span>
+      </button>
     </div>
-  </div>
+  </section>
 
-  <!-- WORKSPACE -->
-  <div id="workspace" class="workspace">
-    <div class="wkhead">
-      <div class="left">
-        <span id="modePill" class="pill hits">HITS Troubleshoot</span>
+  <!-- ============ WORKSPACE ============ -->
+  <section id="ws" class="view">
+    <div class="wsbar">
+      <div class="crumb">
+        <span class="chip hits" id="trackChip">
+          <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>
+          <span id="trackName">HITS Troubleshoot</span>
+        </span>
       </div>
-      <button class="btn-ghost" onclick="goHome()">← Back to tracks</button>
+      <button class="back" onclick="goHome()">
+        <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+        Back to tracks
+      </button>
     </div>
 
     <div class="card">
-      <p class="section-title">Seller lookup</p>
-      <div class="search-row">
-        <input id="sellerId" type="text" placeholder="Enter Seller ID (e.g. SD-104872)" onkeydown="if(event.key==='Enter')fetchSeller()" />
-        <button class="btn" id="fetchBtn" onclick="fetchSeller()">Fetch details</button>
+      <div class="label"><svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg> Seller lookup</div>
+      <div class="search">
+        <div class="field">
+          <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18"/></svg>
+          <input id="sellerId" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="Enter Seller ID (e.g. 62136e41bad7417a5d621432)"
+                 aria-label="Seller ID"
+                 onkeydown="if(event.key==='Enter')fetchSeller()" />
+        </div>
+        <button class="btn" id="fetchBtn" onclick="fetchSeller()">
+          <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9"/><path d="M21 3v6h-6"/></svg>
+          Fetch details
+        </button>
       </div>
-      <p class="hint">Tip: try any ID — sample data is shown until the live data source is connected.</p>
+      <div class="helper">
+        <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        <span id="helperText">Mapping from card 7753 · business details from card 10353.</span>
+      </div>
     </div>
 
-    <div id="loader" class="loader"><div class="spin"></div> Pulling account data…</div>
-
-    <!-- RESULTS -->
-    <div id="results" class="results">
-      <div class="card">
-        <div class="seller-head">
-          <div class="avatar" id="avatar">S</div>
-          <div class="meta">
-            <h2 id="sellerName">Seller</h2>
-            <div class="sub" id="sellerSub">—</div>
-          </div>
-          <div class="status-chip" id="statusChip">—</div>
-        </div>
-
-        <div class="grid" id="kpis"></div>
-
-        <p class="section-title" style="margin-top:24px">Account details</p>
-        <div class="detail-grid" id="details"></div>
-      </div>
-
-      <div class="plan-cta">
-        <button class="btn btn-lg" onclick="generatePlan()">✦ Give next plan of action</button>
-      </div>
-
-      <!-- PLAN -->
-      <div id="plan" class="plan">
-        <div class="card">
-          <p class="section-title">Recommended strategy</p>
-          <div class="tabs">
-            <button class="tab active" onclick="switchTab(0)">🌐 Website actions</button>
-            <button class="tab" onclick="switchTab(1)">🎯 Campaign actions</button>
-            <button class="tab" onclick="switchTab(2)">💡 Out of the box</button>
-          </div>
-          <div class="tabpane active" id="pane0"></div>
-          <div class="tabpane" id="pane1"></div>
-          <div class="tabpane" id="pane2"></div>
-        </div>
-      </div>
-    </div>
-  </div>
+    <div id="results"></div>
+  </section>
 
   <footer>
-    Data source: <code>sample / mock</code> — wire the live source in <code>fetchSellerData()</code> inside this file.<br/>
-    Meta Account Troubleshoot · built for the HITS / Growth team
+    Connect the live backend by setting <code>?api=https://your-host</code> or
+    <code>localStorage.API_BASE</code>. No backend = sample mode.<br/>
+    Meta Account Troubleshoot · HITS / Growth team
   </footer>
 </div>
 
 <script>
 /* =========================================================================
-   CONFIG — wire your live backend / AI agent here later
+   CONFIG — resolves the backend base URL, with graceful sample fallback.
+   Priority:  ?api=...   >   localStorage.API_BASE   >   none (sample mode)
    ========================================================================= */
-const CONFIG = {
-  // Set to your backend endpoint when ready. Leave empty to use mock data.
-  // e.g. "https://your-api.com/seller" -> POST {sellerId, mode}
-  DATA_API: "",
-  // Set to your AI plan endpoint when ready. Leave empty to use rule-based mock.
-  // e.g. "https://your-api.com/plan" -> POST {seller, mode}
-  PLAN_API: ""
-};
+const API_BASE = (() => {
+  const q = new URLSearchParams(location.search).get('api');
+  if (q) { try { localStorage.setItem('API_BASE', q); } catch(e){} return q.replace(/\/$/, ''); }
+  try { const s = localStorage.getItem('API_BASE'); if (s) return s.replace(/\/$/, ''); } catch(e){}
+  return '';
+})();
 
-let STATE = { mode: "hits", seller: null };
+const STATE = { mode:'hits', seller:null, live:false };
 
-/* ---------- Navigation ---------- */
+/* ---------- source indicator ---------- */
+(function initSource(){
+  const dot = document.getElementById('srcDot'), txt = document.getElementById('srcText');
+  if (!API_BASE){ txt.textContent = 'Sample mode'; dot.style.background = 'var(--warn)'; dot.style.boxShadow='0 0 0 3px rgba(251,191,36,.18)'; return; }
+  fetch(API_BASE + '/api/health').then(r=>r.json()).then(h=>{
+    STATE.live = true;
+    txt.textContent = 'Live · ' + (h.claude ? 'AI ready' : 'data only');
+    dot.style.background = 'var(--ok)';
+  }).catch(()=>{ txt.textContent = 'Backend offline · sample mode'; dot.style.background='var(--bad)'; dot.style.boxShadow='0 0 0 3px rgba(251,113,133,.18)'; });
+})();
+
+/* ---------- navigation ---------- */
 function openMode(mode){
   STATE.mode = mode;
-  document.getElementById('home').style.display = 'none';
-  const ws = document.getElementById('workspace'); ws.classList.add('show');
-  const pill = document.getElementById('modePill');
-  if(mode === 'hits'){ pill.className='pill hits'; pill.textContent='HITS Troubleshoot'; }
-  else { pill.className='pill growth'; pill.textContent='1k–5k Troubleshoot'; }
-  resetResults();
+  document.getElementById('home').classList.remove('show');
+  const ws = document.getElementById('ws'); ws.classList.add('show');
+  const chip = document.getElementById('trackChip');
+  chip.className = 'chip ' + (mode==='hits'?'hits':'growth');
+  document.getElementById('trackName').textContent = mode==='hits' ? 'HITS Troubleshoot' : '1k–5k Troubleshoot';
+  document.getElementById('results').innerHTML = '';
+  document.getElementById('sellerId').value = '';
   window.scrollTo({top:0,behavior:'smooth'});
+  setTimeout(()=>document.getElementById('sellerId').focus(), 350);
 }
 function goHome(){
-  document.getElementById('workspace').classList.remove('show');
-  document.getElementById('home').style.display = 'block';
+  document.getElementById('ws').classList.remove('show');
+  document.getElementById('home').classList.add('show');
   window.scrollTo({top:0,behavior:'smooth'});
 }
-function resetResults(){
-  document.getElementById('results').classList.remove('show');
-  document.getElementById('plan').classList.remove('show');
-  document.getElementById('sellerId').value = '';
-}
 
-/* ---------- Fetch seller ----------
-   Replace fetchSellerData() body with a real API call when ready.
-*/
-async function fetchSellerData(sellerId, mode){
-  if(CONFIG.DATA_API){
-    const r = await fetch(CONFIG.DATA_API, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ sellerId, mode })
-    });
-    if(!r.ok) throw new Error('API error '+r.status);
-    return await r.json();
+/* ---------- data layer ---------- */
+async function apiSeller(id, mode){
+  if (API_BASE){
+    const r = await fetch(API_BASE+'/api/seller',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({seller_id:id,mode})});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); throw new Error(e.detail||('API '+r.status)); }
+    return r.json();
   }
-  // ---- MOCK DATA (placeholder until live source is fed) ----
-  await new Promise(res=>setTimeout(res, 900));
-  const seed = [...sellerId].reduce((a,c)=>a+c.charCodeAt(0),0) || 7;
-  const r = (min,max)=> Math.round((min + ((seed*9301+49297)%233280)/233280 * (max-min)));
-  const spend = r(1200, 5400);
-  const roas = (r(80,340)/100);
-  const statuses = [['Healthy','s-ok'],['Needs attention','s-warn'],['At risk','s-bad']];
-  const st = statuses[seed % 3];
-  return {
-    sellerId,
-    name: "Seller "+sellerId.toUpperCase(),
-    category: ["Apparel","Home & Kitchen","Beauty","Electronics","Footwear"][seed%5],
-    region: ["North","South","East","West"][seed%4],
-    status: st,
-    kpis: [
-      {k:"Weekly Spend", v:"₹"+spend.toLocaleString(), d:(seed%2?"+":"−")+r(2,18)+"% WoW", cls:seed%2?"up":"down"},
-      {k:"ROAS", v:roas.toFixed(2)+"x", d:roas>2?"above target":"below target", cls:roas>2?"up":"down"},
-      {k:"Orders (7d)", v:r(20,260), d:(seed%2?"+":"−")+r(1,22)+"%", cls:seed%2?"up":"down"},
-      {k:"CTR", v:(r(60,260)/100).toFixed(2)+"%", d:"vs 1.8% bench", cls:"flat"},
-    ],
-    details: [
-      ["Account ID", sellerId.toUpperCase()],
-      ["Onboarded", "FY"+r(22,25)+" · "+["Q1","Q2","Q3","Q4"][seed%4]],
-      ["Daily Budget", "₹"+r(180,900).toLocaleString()],
-      ["Active Campaigns", r(1,9)],
-      ["CPM", "₹"+r(60,340)],
-      ["Conversion Rate", (r(40,260)/100).toFixed(2)+"%"],
-      ["Website Health", ["Good","Average","Poor"][seed%3]],
-      ["Pixel Status", seed%4 ? "Firing" : "Issues detected"],
-    ],
-    flags: {
-      lowRoas: roas < 2,
-      websitePoor: seed%3===2,
-      pixelIssue: seed%4===0,
-      lowCtr: r(60,260)/100 < 1.2
-    }
-  };
+  return mockSeller(id, mode);
+}
+async function apiPlan(seller, mode){
+  if (API_BASE && STATE.live){
+    const r = await fetch(API_BASE+'/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({seller,mode})});
+    if(!r.ok){ const e = await r.json().catch(()=>({})); throw new Error(e.detail||('API '+r.status)); }
+    return r.json();
+  }
+  return mockPlan(seller, mode);
 }
 
+/* ---------- fetch + render seller ---------- */
 async function fetchSeller(){
   const id = document.getElementById('sellerId').value.trim();
   if(!id){ document.getElementById('sellerId').focus(); return; }
-  const btn = document.getElementById('fetchBtn');
-  btn.disabled = true;
-  document.getElementById('results').classList.remove('show');
-  document.getElementById('plan').classList.remove('show');
-  document.getElementById('loader').classList.add('show');
+  const btn = document.getElementById('fetchBtn'); btn.disabled = true;
+  renderSkeleton();
   try{
-    const data = await fetchSellerData(id, STATE.mode);
+    const data = await apiSeller(id, STATE.mode);
     STATE.seller = data;
     renderSeller(data);
-    document.getElementById('results').classList.add('show');
   }catch(e){
-    alert('Could not fetch seller: '+e.message);
-  }finally{
-    btn.disabled = false;
-    document.getElementById('loader').classList.remove('show');
-  }
+    document.getElementById('results').innerHTML =
+      `<div class="card reveal"><div class="empty">Couldn't fetch seller <b>${esc(id)}</b><br/>${esc(e.message)}</div></div>`;
+  }finally{ btn.disabled = false; }
 }
 
-function renderSeller(d){
-  document.getElementById('avatar').textContent = (d.name||'S')[0].toUpperCase();
-  document.getElementById('sellerName').textContent = d.name;
-  document.getElementById('sellerSub').textContent = `${d.category} · ${d.region} · ${STATE.mode==='hits'?'HITS':'1k–5k'} track`;
-  const chip = document.getElementById('statusChip');
-  chip.className = 'status-chip '+d.status[1];
-  chip.textContent = d.status[0];
-
-  document.getElementById('kpis').innerHTML = d.kpis.map(x=>`
-    <div class="kpi"><div class="k">${x.k}</div><div class="v">${x.v}</div><div class="d ${x.cls}">${x.d}</div></div>
-  `).join('');
-
-  document.getElementById('details').innerHTML = d.details.map(([k,v])=>`
-    <div class="kv"><span class="key">${k}</span><span class="val">${v}</span></div>
-  `).join('');
-}
-
-/* ---------- Generate plan ----------
-   Replace generatePlanData() with an AI-agent call when ready (see PLAN_API).
-*/
-async function generatePlanData(seller, mode){
-  if(CONFIG.PLAN_API){
-    const r = await fetch(CONFIG.PLAN_API, {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ seller, mode })
-    });
-    if(!r.ok) throw new Error('Plan API error '+r.status);
-    return await r.json(); // expects {website:[], campaign:[], outside:[]}
-  }
-  // ---- RULE-BASED MOCK PLAN (placeholder) ----
-  const f = seller.flags || {};
-  const website = [];
-  const campaign = [];
-  const outside = [];
-
-  website.push({t:"Audit landing page load speed", d:"Run PageSpeed on top 3 product pages; target <2.5s LCP. Compress hero images and defer non-critical JS.", p:"med"});
-  if(f.websitePoor) website.push({t:"Fix website health issues", d:"Website health is flagged Poor — review broken links, mobile layout and checkout friction. This directly caps conversion.", p:"high"});
-  if(f.pixelIssue) website.push({t:"Repair Meta Pixel / CAPI", d:"Pixel shows issues — events aren't firing reliably, so optimization is blind. Reinstall pixel and enable Conversions API.", p:"high"});
-  website.push({t:"Strengthen product detail pages", d:"Add trust badges, clearer pricing, and 3+ lifestyle images per SKU to lift add-to-cart rate.", p:"low"});
-
-  if(f.lowRoas) campaign.push({t:"Restructure for ROAS recovery", d:"ROAS is below target. Consolidate ad sets, kill bottom 20% creatives by spend, and shift budget to the top ROAS audience.", p:"high"});
-  campaign.push({t:"Refresh creative angles", d:"Launch 3 new creatives testing distinct hooks (price, social proof, problem-solution) against the current winner.", p:"med"});
-  if(f.lowCtr) campaign.push({t:"Lift CTR with hook testing", d:"CTR is under benchmark — test thumb-stopping first 3 seconds and bolder primary text variants.", p:"high"});
-  campaign.push({t:"Expand winning audience", d:"Build 1% and 1–3% lookalikes from recent purchasers and layer onto the best-performing ad set.", p:"low"});
-
-  outside.push({t:"Test WhatsApp / retention loop", d:"Re-engage past buyers with a WhatsApp broadcast or abandoned-cart flow — cheap incremental revenue outside paid.", p:"med"});
-  outside.push({t:mode==='hits'?"Trigger HITS incentive play":"Unlock scale incentive", d:mode==='hits'?"Account qualifies for a HITS incentive nudge — pair a spend target with the recovery plan to accelerate.":"Offer a tiered spend incentive to push from the 1k–5k band into the next tier.", p:"med"});
-  outside.push({t:"Try a creator / UGC collab", d:"Source 2–3 UGC videos from micro-creators in the category and run them as fresh paid creative.", p:"low"});
-
-  await new Promise(res=>setTimeout(res, 700));
-  return { website, campaign, outside };
-}
-
-async function generatePlan(){
-  const plan = document.getElementById('plan');
-  plan.classList.add('show');
-  ['pane0','pane1','pane2'].forEach(id=>document.getElementById(id).innerHTML='<div class="empty"><span class="spin" style="display:inline-block"></span></div>');
-  plan.scrollIntoView({behavior:'smooth',block:'nearest'});
-  try{
-    const data = await generatePlanData(STATE.seller, STATE.mode);
-    renderPlan('pane0', data.website);
-    renderPlan('pane1', data.campaign);
-    renderPlan('pane2', data.outside);
-  }catch(e){
-    document.getElementById('pane0').innerHTML = '<div class="empty">Could not generate plan: '+e.message+'</div>';
-  }
-}
-
-function renderPlan(paneId, items){
-  const el = document.getElementById(paneId);
-  if(!items || !items.length){ el.innerHTML='<div class="empty">No actions for this category.</div>'; return; }
-  el.innerHTML = items.map((a,i)=>`
-    <div class="action">
-      <div class="n">${i+1}</div>
-      <div class="body">
-        <h4>${a.t}</h4>
-        <p>${a.d}</p>
-        <span class="prio p-${a.p}">${a.p==='high'?'High priority':a.p==='med'?'Medium priority':'Nice to have'}</span>
+function renderSkeleton(){
+  document.getElementById('results').innerHTML = `
+    <div class="card reveal">
+      <div class="sellerhead">
+        <div class="sk" style="width:54px;height:54px;border-radius:15px"></div>
+        <div style="flex:1"><div class="sk" style="width:180px;height:20px"></div><div class="sk" style="width:240px;height:13px;margin-top:10px"></div></div>
       </div>
     </div>
-  `).join('');
+    <div class="twocol">
+      <div class="card"><div class="sk" style="width:120px;height:13px;margin-bottom:16px"></div>
+        ${'<div class="sk" style="height:62px;margin-bottom:12px"></div>'.repeat(4)}</div>
+      <div class="card"><div class="sk" style="width:120px;height:13px;margin-bottom:16px"></div>
+        ${'<div class="sk" style="height:62px;margin-bottom:12px"></div>'.repeat(4)}</div>
+    </div>`;
 }
 
+function person(role, name){
+  const has = name && name.trim();
+  const ini = has ? name.trim().split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase() : '—';
+  return `<div class="person">
+    <div class="pic">${ini}</div>
+    <div><div class="role">${role}</div><div class="name ${has?'':'empty'}">${has?esc(name):'Not assigned'}</div></div>
+  </div>`;
+}
+function money(v){ return v==null ? '—' : '₹'+Number(v).toLocaleString('en-IN',{maximumFractionDigits:2}); }
+function num(v){ return v==null ? '—' : Number(v).toLocaleString('en-IN'); }
+
+function renderSeller(d){
+  const m = d.mapping||{}, b = d.business||{};
+  const ini = (d.company||'S').trim()[0].toUpperCase();
+  const web = b.website ? `<a href="${esc(/^https?:/.test(b.website)?b.website:'https://'+b.website)}" target="_blank" rel="noopener">
+      <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>${esc(b.website)}</a>` : '';
+  const contact = b.contact ? `<span><svg class="icon icon-sm" viewBox="0 0 24 24" style="display:inline;vertical-align:-3px"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3 19.5 19.5 0 0 1-6-6 19.8 19.8 0 0 1-3-8.6A2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2Z"/></svg> ${esc(b.contact)}</span>` : '';
+
+  const html = `
+  <div class="card reveal">
+    <div class="sellerhead">
+      <div class="avatar">${ini}</div>
+      <div>
+        <h2>${esc(d.company||('Seller '+d.seller_id))}</h2>
+        <div class="meta">
+          <span class="tnum">ID ${esc(d.seller_id)}</span>
+          ${web}${contact}
+        </div>
+      </div>
+      <span class="status ${d.status?.[1]||'s-warn'}">
+        <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>
+        ${esc(d.status?.[0]||'—')}
+      </span>
+    </div>
+  </div>
+
+  <div class="twocol">
+    <div class="card reveal" style="animation-delay:.05s">
+      <div class="label"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9"/></svg> Account team</div>
+      <div class="team">
+        ${person('Growth Consultant (GC)', m.gc)}
+        ${person('Growth Manager (GM)', m.gm)}
+        ${person('Key Account Exec (KAE)', m.kae)}
+        ${person('Key Account Mgr (KAM)', m.kam)}
+      </div>
+      ${(m.growth_lead||m.golive_poc||m.onboarding_poc||m.assistant_manager||m.profitability_am) ? `
+      <details class="extra">
+        <summary><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg> More contacts</summary>
+        <div class="team">
+          ${m.growth_lead?person('Growth Lead', m.growth_lead):''}
+          ${m.golive_poc?person('Go-live POC', m.golive_poc):''}
+          ${m.onboarding_poc?person('Onboarding POC', m.onboarding_poc):''}
+          ${m.assistant_manager?person('Assistant Manager', m.assistant_manager):''}
+          ${m.profitability_am?person('Profitability AM', m.profitability_am):''}
+        </div>
+      </details>`:''}
+    </div>
+
+    <div class="card reveal" style="animation-delay:.1s">
+      <div class="label"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M3 3v18h18"/><rect x="7" y="10" width="3" height="8"/><rect x="13" y="6" width="3" height="12"/></svg> Business details</div>
+      <div class="kpis">
+        <div class="kpi"><div class="k">Products at go-live</div><div class="v tnum">${num(b.products_at_go_live)}</div></div>
+        <div class="kpi"><div class="k">AOV at go-live</div><div class="v tnum">${money(b.aov_at_gl)}</div></div>
+        <div class="kpi"><div class="k">COGS at go-live</div><div class="v tnum">${b.cogs_at_gl==null?'—':Number(b.cogs_at_gl).toLocaleString('en-IN')+'%'}</div></div>
+        <div class="kpi"><div class="k">Go-live status</div><div class="v" style="font-size:18px">${esc(m.go_live||'—')}</div></div>
+      </div>
+      <div style="margin-top:14px">
+        <div class="kv"><span class="k">Company</span><span class="v">${esc(b.company||'—')}</span></div>
+        <div class="kv"><span class="k">Offers</span><span class="v">${esc(b.offers||'—')}</span></div>
+        <div class="kv"><span class="k">Track</span><span class="v">${STATE.mode==='hits'?'HITS':'1k–5k'}</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="plancta">
+    <button class="btn btn-lg" onclick="generatePlan()">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M5 3v4M3 5h4M6 17v4M4 19h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5L13 3Z"/></svg>
+      Give next plan of action
+    </button>
+  </div>
+
+  <div id="plan"></div>`;
+  document.getElementById('results').innerHTML = html;
+}
+
+/* ---------- plan ---------- */
+const TABS = [
+  {key:'website',  label:'Website actions',  icon:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/>'},
+  {key:'campaign', label:'Campaign actions', icon:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>'},
+  {key:'outside',  label:'Out of the box',   icon:'<path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2Z"/>'},
+];
+async function generatePlan(){
+  const wrap = document.getElementById('plan');
+  wrap.innerHTML = `<div class="card reveal"><div class="empty"><span class="spin" style="display:inline-block;vertical-align:middle"></span> &nbsp;${API_BASE&&STATE.live?'Claude is analysing the account…':'Building plan…'}</div></div>`;
+  wrap.scrollIntoView({behavior:'smooth',block:'nearest'});
+  let data;
+  try{ data = await apiPlan(STATE.seller, STATE.mode); }
+  catch(e){ wrap.innerHTML = `<div class="card"><div class="empty">Couldn't generate plan<br/>${esc(e.message)}</div></div>`; return; }
+
+  wrap.innerHTML = `
+  <div class="card reveal">
+    <div class="label"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m12 3 1.9 5.8H20l-4.9 3.6L17 18l-5-3.7L7 18l1.9-5.6L4 8.8h6.1L12 3Z"/></svg> Recommended strategy</div>
+    <div class="tabs" role="tablist">
+      ${TABS.map((t,i)=>`<button class="tab" role="tab" aria-selected="${i===0}" id="tab${i}" onclick="switchTab(${i})">
+        <svg class="icon icon-sm" viewBox="0 0 24 24">${t.icon}</svg>${t.label}</button>`).join('')}
+    </div>
+    ${TABS.map((t,i)=>`<div class="pane ${i===0?'show':''}" id="pane${i}" role="tabpanel">${renderActions(data[t.key])}</div>`).join('')}
+    <div class="source-note">
+      <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+      ${API_BASE&&STATE.live?'Generated live by Claude':'Sample plan — connect backend for live AI'}
+    </div>
+  </div>`;
+}
+function renderActions(items){
+  if(!items||!items.length) return '<div class="empty">No actions for this category.</div>';
+  const pl = {high:'High priority',med:'Medium priority',low:'Nice to have'};
+  return items.map((a,i)=>`
+    <div class="action" style="animation-delay:${i*0.04}s">
+      <div class="n">${i+1}</div>
+      <div>
+        <h4>${esc(a.t)}</h4>
+        <p>${esc(a.d)}</p>
+        <span class="prio p-${a.p||'med'}"><i></i>${pl[a.p]||'Medium priority'}</span>
+      </div>
+    </div>`).join('');
+}
 function switchTab(i){
-  document.querySelectorAll('.tab').forEach((t,idx)=>t.classList.toggle('active', idx===i));
-  document.querySelectorAll('.tabpane').forEach((p,idx)=>p.classList.toggle('active', idx===i));
+  document.querySelectorAll('.tab').forEach((t,idx)=>t.setAttribute('aria-selected', idx===i));
+  document.querySelectorAll('.pane').forEach((p,idx)=>p.classList.toggle('show', idx===i));
+}
+
+/* ---------- helpers ---------- */
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* =========================================================================
+   MOCK DATA — used only when no backend is connected (sample mode).
+   ========================================================================= */
+function mockSeller(id, mode){
+  const seed = [...id].reduce((a,c)=>a+c.charCodeAt(0),0)||7;
+  const r=(min,max)=>Math.round(min+((seed*9301+49297)%233280)/233280*(max-min));
+  const names=['Aisha Khan','Rohan Mehta','Simran Kaur','Vikram Rao','Neha Gupta','Arjun Nair','Priya Shah','Karan Bedi'];
+  const pick=n=>names[(seed+n)%names.length];
+  return new Promise(res=>setTimeout(()=>res({
+    seller_id:id, company:['Rudra Rage','Lumière Home','Nova Apparel','Bloom Beauty','PeakFit Gear'][seed%5], mode,
+    status: [['Live','s-ok'],['Live · unassigned','s-warn'],['Not live yet','s-warn']][seed%3],
+    mapping:{gc:pick(0),gm:pick(1),kae:pick(2),kam:pick(3),growth_lead:pick(4),golive_poc:pick(5),onboarding_poc:null,assistant_manager:null,profitability_am:null,go_live:seed%3===2?'No':'Yes'},
+    business:{company:['Rudra Rage','Lumière Home','Nova Apparel','Bloom Beauty','PeakFit Gear'][seed%5],website:'www.example.com',contact:'9'+r(100000000,899999999),offers:['Buy 1 Get 1','Flat 20% off','Free shipping',null][seed%4],products_at_go_live:r(20,300),aov_at_gl:r(300,1400)+0.9,cogs_at_gl:r(10,45)}
+  }),700));
+}
+function mockPlan(seller, mode){
+  const b=seller.business||{}, m=seller.mapping||{};
+  const website=[
+    {t:'Audit landing-page load speed',d:'Run PageSpeed on top 3 product pages; target LCP under 2.5s. Compress hero images and defer non-critical JS.',p:'med'},
+    {t:'Verify Meta Pixel + Conversions API',d:'Confirm purchase/add-to-cart events fire reliably — without clean signal the algorithm optimises blind.',p:'high'},
+    {t:'Strengthen product detail pages',d:`With ${b.products_at_go_live||'several'} SKUs live, add trust badges, clear pricing and 3+ lifestyle images to lift add-to-cart.`,p:'low'},
+  ];
+  const campaign=[
+    {t:'Restructure for ROAS recovery',d:'Consolidate ad sets, cut the bottom 20% of creatives by spend, and shift budget to the top ROAS audience.',p:'high'},
+    {t:'Refresh creative angles',d:`AOV is ~${b.aov_at_gl?('₹'+Math.round(b.aov_at_gl)):'mid'}; test 3 hooks (price, social proof, problem-solution) vs the current winner.`,p:'med'},
+    {t:'Expand winning audience',d:'Build 1% and 1–3% lookalikes from recent purchasers and layer onto the best-performing ad set.',p:'low'},
+  ];
+  const outside=[
+    {t:mode==='hits'?'Trigger a HITS incentive nudge':'Unlock a scale incentive',d:mode==='hits'?'Pair a weekly spend target with the recovery plan to accelerate the account.':'Offer a tiered spend incentive to push from the 1k–5k band to the next tier.',p:'med'},
+    {t:'Activate a WhatsApp retention loop',d:'Re-engage past buyers with an abandoned-cart and win-back flow — cheap incremental revenue outside paid.',p:'med'},
+    {t:'Run a UGC / micro-creator collab',d:'Source 2–3 UGC videos in-category and run them as fresh paid creative.',p:'low'},
+  ];
+  if(m.go_live==='No') website.unshift({t:'Complete go-live setup first',d:'Account is not live yet — finish catalogue, pixel and storefront setup before scaling spend.',p:'high'});
+  return new Promise(res=>setTimeout(()=>res({website,campaign,outside}),600));
 }
 </script>
 </body>
