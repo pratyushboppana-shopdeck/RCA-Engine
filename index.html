@@ -202,6 +202,26 @@
   .kv .k{color:var(--txt-2)}
   .kv .v{font-weight:600;text-align:right}
 
+  /* ---------- analysis inputs ---------- */
+  .in-row{margin-bottom:16px}
+  .in-label{display:block;font-size:13px;font-weight:600;margin-bottom:8px}
+  .req{font-size:10.5px;font-weight:600;color:var(--bad);background:rgba(251,113,133,.12);padding:2px 7px;border-radius:999px;margin-left:6px;vertical-align:1px}
+  .sub-note{font-size:11.5px;color:var(--txt-3);margin-top:7px}
+  .uploads{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:4px}
+  @media(max-width:560px){.uploads{grid-template-columns:1fr}}
+  .uptile{display:flex;align-items:center;gap:13px;padding:15px;border:1.5px dashed var(--line-strong);border-radius:var(--r);background:var(--bg);cursor:pointer;transition:border-color var(--fast),background var(--fast)}
+  .uptile:hover{border-color:var(--primary);background:var(--surface-2)}
+  .uptile.done{border-style:solid;border-color:rgba(52,211,153,.45);background:rgba(52,211,153,.06)}
+  .uptile .up-ico{width:40px;height:40px;border-radius:11px;background:var(--primary-soft);border:1px solid rgba(99,102,241,.3);display:grid;place-items:center;color:#a5b4fc;flex-shrink:0}
+  .uptile.done .up-ico{background:rgba(52,211,153,.14);border-color:rgba(52,211,153,.35);color:var(--ok)}
+  .up-body{flex:1;min-width:0}
+  .up-title{font-size:14px;font-weight:600}
+  .up-hint{font-size:12px;color:var(--txt-3);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .up-check{width:24px;flex-shrink:0}
+  .extra-list{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .filechip{font-size:12px;color:var(--txt-2);background:var(--surface-2);border:1px solid var(--line);padding:5px 11px;border-radius:999px}
+  .gate-hint{text-align:center;font-size:12.5px;color:var(--txt-3);margin-top:12px}
+
   /* ---------- plan ---------- */
   .plancta{display:flex;justify-content:center;margin-top:24px}
   .btn-lg{padding:16px 28px;font-size:15px;border-radius:16px}
@@ -346,7 +366,7 @@ const API_BASE = (() => {
   return DEFAULT_API;
 })();
 
-const STATE = { mode:'hits', seller:null, live:false };
+const STATE = { mode:'hits', seller:null, live:false, inputs:null };
 
 /* ---------- source indicator ---------- */
 (function initSource(){
@@ -387,13 +407,20 @@ async function apiSeller(id, mode){
   }
   return mockSeller(id, mode);
 }
-async function apiPlan(seller, mode){
+async function apiPlan(seller, mode, inputs){
+  const payload = {
+    seller, mode,
+    website: inputs.website || '',
+    pnl_csv: inputs.pnl ? inputs.pnl.content : '',
+    meta_csv: inputs.meta ? inputs.meta.content : '',
+    extra_csv: (inputs.extra || []).map(f => ({name:f.name, content:f.content})),
+  };
   if (API_BASE && STATE.live){
-    const r = await fetch(API_BASE+'/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({seller,mode})});
+    const r = await fetch(API_BASE+'/api/plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     if(!r.ok){ const e = await r.json().catch(()=>({})); throw new Error(e.detail||('API '+r.status)); }
     return r.json();
   }
-  return mockPlan(seller, mode);
+  return mockPlan(seller, mode, inputs);
 }
 
 /* ---------- fetch + render seller ---------- */
@@ -537,15 +564,113 @@ function renderSeller(d){
 
   ${categoryCard(d.category, d.benchmark)}
 
+  ${inputsCard(d)}
+
   <div class="plancta">
-    <button class="btn btn-lg" onclick="generatePlan()">
+    <button class="btn btn-lg" id="planBtn" onclick="generatePlan()" disabled>
       <svg class="icon" viewBox="0 0 24 24"><path d="M5 3v4M3 5h4M6 17v4M4 19h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5L13 3Z"/></svg>
       Give next plan of action
     </button>
   </div>
+  <div class="gate-hint" id="gateHint"></div>
 
   <div id="plan"></div>`;
   document.getElementById('results').innerHTML = html;
+  // reset & wire the analysis inputs (website prefilled from card 10353/10352)
+  STATE.inputs = { website: (d.business && d.business.website) || '', pnl:null, meta:null, extra:[] };
+  updateGate();
+}
+
+/* ---------- analysis inputs (2 CSV mandatory + website) ---------- */
+function inputsCard(d){
+  const web = (d.business && d.business.website) || '';
+  const srcNote = (d.business && d.business.website_source)
+    ? `auto-filled from card ${d.business.website_source}` : 'enter manually';
+  return `<div class="card reveal" style="animation-delay:.16s">
+    <div class="label"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></svg> Inputs for analysis</div>
+
+    <div class="in-row">
+      <label class="in-label" for="websiteInput">Website link <span class="req">required</span></label>
+      <div class="field">
+        <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>
+        <input id="websiteInput" type="text" value="${esc(web)}" placeholder="https://sellerstore.com"
+               oninput="STATE.inputs.website=this.value;updateGate()" />
+      </div>
+      <div class="sub-note">${esc(srcNote)}</div>
+    </div>
+
+    <div class="uploads">
+      ${uploadTile('pnl','P&L file (CSV)','Revenue, COGS, margins, spend, returns…')}
+      ${uploadTile('meta','Meta ad metrics (CSV)','Spend, ROAS, CTR, CPM, conversions…')}
+    </div>
+
+    <details class="extra" style="margin-top:4px">
+      <summary><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></svg> Add more CSVs (optional)</summary>
+      <input class="extra-files" type="file" accept=".csv,text/csv" multiple onchange="onExtraFiles(this)" style="margin-top:10px" />
+      <div id="extraList" class="extra-list"></div>
+    </details>
+  </div>`;
+}
+
+function uploadTile(kind, title, hint){
+  return `<label class="uptile" id="tile-${kind}">
+    <input type="file" accept=".csv,text/csv" onchange="onFile('${kind}',this)" hidden />
+    <div class="up-ico"><svg class="icon" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5-5 5 5"/><path d="M12 5v12"/></svg></div>
+    <div class="up-body">
+      <div class="up-title">${title} <span class="req">required</span></div>
+      <div class="up-hint" id="hint-${kind}">${hint}</div>
+    </div>
+    <div class="up-check" id="check-${kind}"></div>
+  </label>`;
+}
+
+function readCsv(file){
+  return new Promise((res,rej)=>{
+    const r=new FileReader();
+    r.onload=()=>res(String(r.result||''));
+    r.onerror=()=>rej(new Error('read failed'));
+    r.readAsText(file);
+  });
+}
+async function onFile(kind, el){
+  const f = el.files && el.files[0];
+  if(!f) return;
+  if(!/\.csv$/i.test(f.name) && f.type!=='text/csv'){ alert('Please upload a .csv file'); el.value=''; return; }
+  try{
+    const content = await readCsv(f);
+    const rows = content.trim().split(/\r?\n/).length - 1;
+    STATE.inputs[kind] = { name:f.name, content };
+    const tile = document.getElementById('tile-'+kind); tile.classList.add('done');
+    document.getElementById('hint-'+kind).textContent = `${f.name} · ${Math.max(rows,0)} rows`;
+    document.getElementById('check-'+kind).innerHTML =
+      '<svg class="icon" viewBox="0 0 24 24" style="color:var(--ok)"><path d="M20 6 9 17l-5-5"/></svg>';
+    updateGate();
+  }catch(e){ alert('Could not read file: '+e.message); }
+}
+async function onExtraFiles(el){
+  const files=[...(el.files||[])];
+  STATE.inputs.extra = [];
+  for(const f of files){ try{ STATE.inputs.extra.push({name:f.name, content:await readCsv(f)}); }catch(e){} }
+  document.getElementById('extraList').innerHTML =
+    STATE.inputs.extra.map(f=>`<span class="filechip">${esc(f.name)}</span>`).join('');
+  updateGate();
+}
+function updateGate(){
+  const i = STATE.inputs || {};
+  const ok = !!(i.pnl && i.meta && (i.website||'').trim());
+  const btn = document.getElementById('planBtn');
+  const hint = document.getElementById('gateHint');
+  if(btn) btn.disabled = !ok;
+  if(hint){
+    if(ok){ hint.textContent=''; }
+    else {
+      const miss=[];
+      if(!(i.website||'').trim()) miss.push('website link');
+      if(!i.pnl) miss.push('P&L CSV');
+      if(!i.meta) miss.push('Meta ad metrics CSV');
+      hint.innerHTML = `<svg class="icon icon-sm" viewBox="0 0 24 24" style="vertical-align:-3px"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg> Add ${miss.join(', ')} to unlock`;
+    }
+  }
 }
 
 /* ---------- plan ---------- */
@@ -555,11 +680,13 @@ const TABS = [
   {key:'outside',  label:'Out of the box',   icon:'<path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.1V18h6v-1.2c0-.8.4-1.6 1-2.1A7 7 0 0 0 12 2Z"/>'},
 ];
 async function generatePlan(){
+  const i = STATE.inputs || {};
+  if(!(i.pnl && i.meta && (i.website||'').trim())){ updateGate(); return; }
   const wrap = document.getElementById('plan');
-  wrap.innerHTML = `<div class="card reveal"><div class="empty"><span class="spin" style="display:inline-block;vertical-align:middle"></span> &nbsp;${API_BASE&&STATE.live?'Claude is analysing the account…':'Building plan…'}</div></div>`;
+  wrap.innerHTML = `<div class="card reveal"><div class="empty"><span class="spin" style="display:inline-block;vertical-align:middle"></span> &nbsp;${API_BASE&&STATE.live?'Claude is deeply analysing the P&L + Meta metrics…':'Building plan…'}</div></div>`;
   wrap.scrollIntoView({behavior:'smooth',block:'nearest'});
   let data;
-  try{ data = await apiPlan(STATE.seller, STATE.mode); }
+  try{ data = await apiPlan(STATE.seller, STATE.mode, i); }
   catch(e){ wrap.innerHTML = `<div class="card"><div class="empty">Couldn't generate plan<br/>${esc(e.message)}</div></div>`; return; }
 
   wrap.innerHTML = `
@@ -619,8 +746,8 @@ function mockSeller(id, mode){
     category:{l1:l1,l2:sub[0],l3:sub[1]}, benchmark:BENCHMARKS[l1]
   }),700));
 }
-function mockPlan(seller, mode){
-  const b=seller.business||{}, m=seller.mapping||{};
+function mockPlan(seller, mode, inputs){
+  const b=seller.business||{}, m=seller.mapping||{}; inputs=inputs||{};
   const website=[
     {t:'Audit landing-page load speed',d:'Run PageSpeed on top 3 product pages; target LCP under 2.5s. Compress hero images and defer non-critical JS.',p:'med'},
     {t:'Verify Meta Pixel + Conversions API',d:'Confirm purchase/add-to-cart events fire reliably — without clean signal the algorithm optimises blind.',p:'high'},

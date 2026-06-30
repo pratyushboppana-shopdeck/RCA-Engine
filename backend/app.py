@@ -42,8 +42,9 @@ CLAUDE_MODEL       = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")  # or c
 
 MAPPING_CARD  = 7753
 BUSINESS_CARD = 10353
+BUSINESS_BACKUP_CARD = 10352   # lighter Category Intelligence card — website/company/contact backup
 CATEGORY_CARD = 10362
-CARDS = (MAPPING_CARD, BUSINESS_CARD, CATEGORY_CARD)
+CARDS = (MAPPING_CARD, BUSINESS_CARD, BUSINESS_BACKUP_CARD, CATEGORY_CARD)
 BUSINESS_SELLER_PARAM_ID = "a45e1c84-6dc1-42fc-93da-79f43ee84255"  # card 10353
 CATEGORY_SELLER_PARAM_ID = "232ba3d0-4861-4ebd-8775-5f8b9d488737"  # card 10362
 
@@ -223,9 +224,18 @@ class SellerReq(BaseModel):
     mode: str = "hits"
 
 
+class CsvFile(BaseModel):
+    name: str = "data.csv"
+    content: str = ""
+
+
 class PlanReq(BaseModel):
     seller: dict
     mode: str = "hits"
+    website: str = ""
+    pnl_csv: str = ""          # P&L export (CSV text)
+    meta_csv: str = ""         # Meta ad-account metrics export (CSV text)
+    extra_csv: list[CsvFile] = []   # optional additional CSVs
 
 
 _INDEX_PATHS = [
@@ -289,8 +299,9 @@ def seller(req: SellerReq):
             return {}
     m   = lookup(MAPPING_CARD)
     b   = lookup(BUSINESS_CARD)
+    b2  = lookup(BUSINESS_BACKUP_CARD)   # backup for website/company/contact/offers
     cat = lookup(CATEGORY_CARD)
-    if not m and not b and not cat:
+    if not m and not b and not b2 and not cat:
         raise HTTPException(404, f"No data found for seller_id '{sid}'")
 
     mapping = {
@@ -305,14 +316,19 @@ def seller(req: SellerReq):
         "profitability_am":  _clean(m.get("profitability_associate_manager_name")),
         "go_live":           _clean(m.get("go_live_sellers")),
     }
+    # prefer card 10353; fall back to lighter card 10352 for the basic fields
+    def pick(field):
+        return _clean(b.get(field)) or _clean(b2.get(field))
     business = {
-        "company":           _clean(b.get("company")),
-        "website":           _clean(b.get("website")),
-        "contact":           _clean(b.get("seller_contact")),
-        "offers":            _clean(b.get("offers")),
+        "company":           pick("company"),
+        "website":           pick("website"),
+        "contact":           pick("seller_contact"),
+        "offers":            pick("offers"),
         "products_at_go_live": _clean(b.get("products_at_go_live")),
         "aov_at_gl":         _clean(b.get("aov_at_gl")),
         "cogs_at_gl":        _clean(b.get("cogs_at_gl")),
+        "website_source":    (BUSINESS_CARD if _clean(b.get("website")) else
+                              (BUSINESS_BACKUP_CARD if _clean(b2.get("website")) else None)),
     }
 
     # category levels (10362): L1=primary_l2, L2=primary_l3, L3=primary_l4
@@ -368,10 +384,26 @@ PLAN_SCHEMA = {
 }
 
 
+CSV_CHAR_LIMIT = 60000  # cap each CSV sent to the model (keeps token use sane)
+
+
+def _csv_block(title, text):
+    text = (text or "").strip()
+    if not text:
+        return f"### {title}\n(none provided)\n"
+    truncated = ""
+    if len(text) > CSV_CHAR_LIMIT:
+        text = text[:CSV_CHAR_LIMIT]
+        truncated = f"\n...[truncated to {CSV_CHAR_LIMIT} chars]"
+    return f"### {title}\n```csv\n{text}{truncated}\n```\n"
+
+
 @app.post("/api/plan")
 def plan(req: PlanReq):
     if not ANTHROPIC_API_KEY:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+    if not req.pnl_csv.strip() or not req.meta_csv.strip():
+        raise HTTPException(400, "Both a P&L CSV and a Meta ad-account metrics CSV are required")
     try:
         import anthropic
     except ImportError:
@@ -382,26 +414,41 @@ def plan(req: PlanReq):
         **({"base_url": ANTHROPIC_BASE_URL} if ANTHROPIC_BASE_URL else {}),
     )
     track = "HITS-managed account" if req.mode == "hits" else "seller in the 1k–5k weekly-spend band"
+    website = (req.website or req.seller.get("business", {}).get("website") or "").strip()
+
     sys_prompt = (
-        "You are a senior Meta (Facebook/Instagram) ads strategist for an Indian D2C "
-        "marketplace's growth team. Given a seller's account-team mapping and business "
-        "details, produce a concrete, prioritized next-plan-of-action. Be specific and "
-        "practical — reference the seller's actual numbers where useful. Return 3-5 actions "
-        "per category. Use priority 'high' for blockers, 'med' for impactful, 'low' for nice-to-have."
+        "You are a senior Meta (Facebook/Instagram) performance-marketing strategist for an "
+        "Indian D2C marketplace's growth team. You are given a seller's account context, their "
+        "P&L data, their Meta ad-account metrics, and their website. ANALYSE THE DATA DEEPLY "
+        "before recommending anything:\n"
+        "- From the P&L: read revenue, COGS, gross/contribution margin, marketing spend, RTO/returns, "
+        "shipping, net profit/loss. Identify what is bleeding money and the break-even ROAS.\n"
+        "- From the Meta metrics: read spend, ROAS, CTR, CPM, CPC, CPP, AOV, frequency, conversion rate "
+        "by campaign/ad set/creative. Find the winners, the wasted spend, and the funnel bottleneck.\n"
+        "- Cross-reference: is the Meta ROAS above the P&L break-even ROAS? Are margins enough to scale?\n"
+        "- Consider the website as the conversion surface.\n"
+        "Then produce a concrete, prioritized next-plan-of-action. Every action must be specific and "
+        "cite the actual numbers/observations that justify it (e.g. 'COGS is 47% so break-even ROAS is "
+        "~2.1x, but campaign X runs at 1.4x — cut it'). Return 3-6 actions per category. "
+        "Priority 'high' = money-losing blocker, 'med' = clear lever, 'low' = nice-to-have."
     )
     user_prompt = (
         f"Seller track: {track}.\n"
-        f"Seller data (JSON):\n{json.dumps(req.seller, indent=2)}\n\n"
-        "Generate the action plan across three categories:\n"
-        "1. website  — landing page / storefront / pixel / catalogue fixes\n"
-        "2. campaign — Meta ad structure, creative, audience, budget actions\n"
-        "3. outside  — out-of-the-box / retention / incentive / creator plays\n"
-        "Call the submit_plan tool with the result."
+        f"Website: {website or '(not available)'}\n\n"
+        f"Seller account context (JSON):\n{json.dumps(req.seller, indent=2)}\n\n"
+        "=== UPLOADED DATA ===\n"
+        + _csv_block("P&L (profit & loss)", req.pnl_csv)
+        + _csv_block("Meta ad-account metrics", req.meta_csv)
+        + "".join(_csv_block(f"Additional: {f.name}", f.content) for f in (req.extra_csv or []))
+        + "\nAnalyse the above deeply, then call submit_plan with the action plan across:\n"
+        "1. website  — landing page / storefront / pixel / catalogue / CRO fixes\n"
+        "2. campaign — Meta ad structure, creative, audience, budget, bidding actions\n"
+        "3. outside  — out-of-the-box / retention / incentive / margin / creator plays"
     )
     try:
         msg = client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=2000,
+            max_tokens=4000,
             system=sys_prompt,
             tools=[{
                 "name": "submit_plan",
