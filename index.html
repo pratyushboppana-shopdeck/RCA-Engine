@@ -650,10 +650,13 @@ function trendCard(metrics, range){
 
 /* ---------- changelog (dashboard 96) ---------- */
 function trunc(v){ v=(v==null?'':String(v)); return v.length>44?v.slice(0,44)+'…':v; }
-function changelogCard(events, range){
-  events = events || [];
+function changelogCard(events, range, loading){
   const note = range ? `${range.start} → ${range.end}` : '';
-  const head = `<div class="label"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg> Recent changes <span class="rng">${esc(note)}</span>${events.length?`<span class="cl-count">${events.length}</span>`:''}</div>`;
+  const head = `<div class="label"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg> Recent changes <span class="rng">${esc(note)}</span>${(events&&events.length)?`<span class="cl-count">${events.length}</span>`:''}</div>`;
+  if (loading){
+    return `<div class="card reveal" style="animation-delay:.15s">${head}<div class="empty" style="padding:18px"><span class="spin" style="display:inline-block;vertical-align:middle"></span> &nbsp;Loading changes…</div></div>`;
+  }
+  events = events || [];
   if (!events.length){
     return `<div class="card reveal" style="animation-delay:.15s">${head}<div class="empty" style="padding:18px">No changes recorded in this window.</div></div>`;
   }
@@ -678,9 +681,12 @@ function demandFlag(rc){
   if (n >= 0)  return {cls:'d-hold', label:'Hold', hint:'Low demand'};
   return {cls:'d-na', label:'No data', hint:'No marketplace match'};
 }
-function demandCard(items){
+function demandCard(items, loading){
+  const head = `<div class="label"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M8 17V9M13 17V5M18 17v-6"/></svg> High-demand products <span class="rng">marketplace rating validation</span>${(items&&items.length)?`<span class="cl-count">${items.length}</span>`:''}</div>`;
+  if (loading){
+    return `<div class="card reveal" style="animation-delay:.155s">${head}<div class="empty" style="padding:18px"><span class="spin" style="display:inline-block;vertical-align:middle"></span> &nbsp;Checking marketplace demand…</div></div>`;
+  }
   items = items || [];
-  const head = `<div class="label"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M8 17V9M13 17V5M18 17v-6"/></svg> High-demand products <span class="rng">marketplace rating validation</span>${items.length?`<span class="cl-count">${items.length}</span>`:''}</div>`;
   if (!items.length){
     return `<div class="card reveal" style="animation-delay:.155s">${head}<div class="empty" style="padding:18px">No marketplace demand data for this seller yet${API_BASE?' (dashboard 398 — quota permitting).':'.'}</div></div>`;
   }
@@ -821,11 +827,11 @@ function renderSeller(d){
 
   ${weeklyPnlCard(d.weekly_pnl)}
 
-  ${changelogCard(d.changelog, d.range)}
+  <div id="changelogSlot">${changelogCard(null, d.range, true)}</div>
 
   ${lastTsCard(d.last_ts)}
 
-  ${demandCard(d.demand_products)}
+  <div id="demandSlot">${demandCard(null, true)}</div>
 
   ${inputsCard(d)}
 
@@ -842,6 +848,28 @@ function renderSeller(d){
   // reset & wire the analysis inputs (website prefilled from card 10353/10352)
   STATE.inputs = { website: (d.business && d.business.website) || '', pnl:null, meta:null, extra:[] };
   updateGate();
+  loadInsights(d);   // lazily load changelog + demand (slow queries) without blocking render
+}
+
+/* ---------- lazy insights (changelog + demand) ---------- */
+async function loadInsights(d){
+  const fill = (changelog, demand) => {
+    if (STATE.seller){ STATE.seller.changelog = changelog; STATE.seller.demand_products = demand; }
+    const cs = document.getElementById('changelogSlot'); if (cs) cs.innerHTML = changelogCard(changelog, d.range);
+    const ds = document.getElementById('demandSlot'); if (ds) ds.innerHTML = demandCard(demand);
+  };
+  // sample mode: mock already carries changelog + demand
+  if (!API_BASE){ fill(d.changelog || [], d.demand_products || []); return; }
+  try{
+    const r = await fetch(API_BASE + '/api/insights', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ seller_id: d.seller_id, start_date: d.range?.start, end_date: d.range?.end })});
+    if(!r.ok) throw new Error('insights '+r.status);
+    const ins = await r.json();
+    // guard: ignore if the user has since loaded a different seller
+    if (STATE.seller && STATE.seller.seller_id === d.seller_id) fill(ins.changelog || [], ins.demand_products || []);
+  }catch(e){
+    fill([], []);
+  }
 }
 
 /* ---------- analysis inputs (2 CSV mandatory + website) ---------- */

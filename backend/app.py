@@ -205,17 +205,18 @@ def _get_changelog(seller_id, start, end):
         {"id": CHANGELOG_PARAM["start"], "value": start},
         {"id": CHANGELOG_PARAM["end"], "value": end},
     ]
-    events = []
-    for dcid, cid, area in CHANGELOG_DASHCARDS:
+    def _one(dc):
+        dcid, cid, area = dc
+        out = []
         try:
             rows = _mb(f"/api/dashboard/{CHANGELOG_DASHBOARD}/dashcard/{dcid}/card/{cid}/query/json",
                        "POST", {"parameters": params})
-        except HTTPException:
-            continue
+        except Exception:
+            return out
         for r in rows if isinstance(rows, list) else []:
             who = " ".join(x for x in [r.get("first_name"), r.get("last_name")] if x).strip() \
                   or r.get("changed_by") or r.get("user_email")
-            events.append({
+            out.append({
                 "date": (r.get("createdat") or r.get("change_date_time") or "")[:19],
                 "area": area,
                 "category": _clean(r.get("category")),
@@ -225,6 +226,13 @@ def _get_changelog(seller_id, start, end):
                 "by": _clean(who),
                 "user_type": _clean(r.get("user_type")),
             })
+        return out
+
+    from concurrent.futures import ThreadPoolExecutor
+    events = []
+    with ThreadPoolExecutor(max_workers=len(CHANGELOG_DASHCARDS)) as ex:
+        for part in ex.map(_one, CHANGELOG_DASHCARDS):
+            events.extend(part)
     events.sort(key=lambda e: e["date"], reverse=True)
     # cap per area so one bulk edit (e.g. catalogue) doesn't crowd out other change types
     per_area, kept = {}, []
@@ -400,6 +408,51 @@ class CsvFile(BaseModel):
     content: str = ""
 
 
+class InsightsReq(BaseModel):
+    seller_id: str
+    start_date: str = ""
+    end_date: str = ""
+
+
+_changelog_cache = {}
+_changelog_lock = threading.Lock()
+
+
+@app.post("/api/insights")
+def insights(req: InsightsReq):
+    """Slow per-seller data (changelog + marketplace demand) — loaded lazily by the UI."""
+    sid = req.seller_id.strip()
+    if not sid:
+        raise HTTPException(400, "seller_id is required")
+    end = (req.end_date or date.today().isoformat())[:10]
+    start = (req.start_date or (date.today() - timedelta(days=30)).isoformat())[:10]
+
+    key = (sid, start, end)
+    with _changelog_lock:
+        c = _changelog_cache.get(key)
+        cached_log = c["data"] if c and time.time() - c["ts"] < 1800 else None
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f_log = ex.submit((lambda: cached_log) if cached_log is not None
+                          else (lambda: _safe_call(_get_changelog, sid, start, end, default=[])))
+        f_dem = ex.submit(_safe_call, _get_demand, sid, default=[])
+        changelog = f_log.result()
+        demand = f_dem.result()
+
+    if cached_log is None:
+        with _changelog_lock:
+            _changelog_cache[key] = {"data": changelog, "ts": time.time()}
+    return {"changelog": changelog, "demand_products": demand, "range": {"start": start, "end": end}}
+
+
+def _safe_call(fn, *args, default=None):
+    try:
+        return fn(*args)
+    except Exception:
+        return default
+
+
 class PlanReq(BaseModel):
     seller: dict
     mode: str = "hits"
@@ -471,7 +524,6 @@ def seller(req: SellerReq):
     m   = lookup(MAPPING_CARD)
     b   = lookup(BUSINESS_CARD)
     b2  = lookup(BUSINESS_BACKUP_CARD)   # backup for website/company/contact/offers
-    cat = _get_category(sid)             # per-seller (10362 can't be bulk-pulled)
 
     # date range (default last 30 days)
     end = (req.end_date or date.today().isoformat())[:10]
@@ -484,17 +536,14 @@ def seller(req: SellerReq):
         series = []
     daily_metrics = [r for r in series if start <= str(r.get("date", ""))[:10] <= end] or series[-30:]
 
-    # changelog (dashboard 96, db2 — live, cheap) for the range
+    # category is a quick per-seller lookup (kept inline). changelog + demand are SLOW
+    # (some Metabase queries ~40s) so they load lazily via /api/insights, not here.
     try:
-        changelog = _get_changelog(sid, start, end)
+        cat = _get_category(sid) or {}
     except Exception:
-        changelog = []
-
-    # marketplace demand validation per product (dashboard 398) — best-effort, cached
-    try:
-        demand_products = _get_demand(sid)
-    except Exception:
-        demand_products = []
+        cat = {}
+    changelog = []          # loaded via POST /api/insights
+    demand_products = []     # loaded via POST /api/insights
 
     # weekly P&L + spend (11011) and last troubleshoot details (10189) from cache
     wp = lookup(WEEKLY_PNL_CARD)
