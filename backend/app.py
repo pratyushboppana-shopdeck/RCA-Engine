@@ -302,7 +302,8 @@ def _get_demand(seller_id):
         out.append({
             "product": _clean(r.get("product_name")) or _clean(r.get("product_id")),
             "product_id": _clean(r.get("dashboard_product_id") or r.get("product_id")),
-            "link": _clean(r.get("product_link")),
+            "link": _clean(r.get("product_link")),                 # our storefront product link
+            "mp_link": _clean(r.get("exact_max_link")),            # marketplace product link (highest-rated match)
             "orders_30d": _clean(r.get("total_orders_in_last_30_days")),
             "contribution_pct": _clean(r.get("product_contribution_perc")),
             "our_price": _clean(r.get("avg_sku_selling_price")),
@@ -536,6 +537,15 @@ def seller(req: SellerReq):
         series = []
     daily_metrics = [r for r in series if start <= str(r.get("date", ""))[:10] <= end] or series[-30:]
 
+    # product-quality (PQ) flags from card 10773 — latest non-null values
+    def _latest(field):
+        for r in reversed(daily_metrics):
+            v = r.get(field)
+            if v is not None:
+                return v
+        return None
+    pq = {"lifetime": _clean(_latest("lifetime_avg_pq")), "last_15d": _clean(_latest("last_15d_avg_pd"))}
+
     # category is a quick per-seller lookup (kept inline). changelog + demand are SLOW
     # (some Metabase queries ~40s) so they load lazily via /api/insights, not here.
     try:
@@ -618,6 +628,7 @@ def seller(req: SellerReq):
         "benchmark": benchmark,
         "range": {"start": start, "end": end},
         "daily_metrics": daily_metrics,
+        "pq": pq,
         "changelog": changelog,
         "demand_products": demand_products,
         "weekly_pnl": weekly_pnl,

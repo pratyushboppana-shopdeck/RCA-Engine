@@ -256,6 +256,24 @@
   .d-test{background:rgba(245,191,36,.14);color:var(--warn);border:1px solid rgba(251,191,36,.35)}
   .d-hold{background:rgba(251,113,133,.13);color:var(--bad);border:1px solid rgba(251,113,133,.32)}
   .d-na{background:var(--surface-2);color:var(--txt-3);border:1px solid var(--line)}
+  .dp-links{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap}
+  .dp-btn{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--txt-2);background:var(--surface-2);border:1px solid var(--line);padding:6px 11px;border-radius:8px;text-decoration:none;transition:var(--fast)}
+  .dp-btn:hover{color:var(--txt);border-color:var(--primary);background:var(--surface-3)}
+  .dp-btn.mp{color:#a5b4fc;border-color:rgba(99,102,241,.3);background:var(--primary-soft)}
+  .dp-btn.mp:hover{filter:brightness(1.1)}
+
+  /* ---------- product quality ---------- */
+  .pq-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .pq{padding:14px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg)}
+  .pq-k{font-size:12px;color:var(--txt-3);font-weight:500}
+  .pq-v{font-size:26px;font-weight:700;margin-top:6px;letter-spacing:-.02em}
+  .pq-d{font-size:12px;font-weight:600;margin-top:4px}
+  .pq-note{font-size:11.5px;color:var(--txt-3);margin-top:12px}
+
+  /* ---------- plan head + export ---------- */
+  .plan-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;flex-wrap:wrap}
+  .btn-export{display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;color:var(--txt);background:var(--surface-2);border:1px solid var(--line-strong);padding:9px 15px;border-radius:10px;transition:var(--fast)}
+  .btn-export:hover{border-color:var(--primary);background:var(--surface-3);transform:translateY(-1px)}
 
   /* ---------- weekly P&L ---------- */
   .wk-grid{display:flex;align-items:stretch;gap:10px}
@@ -673,6 +691,28 @@ function changelogCard(events, range, loading){
   return `<div class="card reveal" style="animation-delay:.15s">${head}<div class="cl-list">${rows}${more}</div></div>`;
 }
 
+/* ---------- product quality (PQ) flags, card 10773 ---------- */
+function pqCard(pq){
+  pq = pq || {};
+  const life = pq.lifetime, l15 = pq.last_15d;
+  if (life == null && l15 == null) return '';
+  const fmt = v => v==null ? '—' : (+v).toFixed(2);
+  let delta=null, cls='flat', dtxt='—';
+  if (life!=null && l15!=null && +life!==0){
+    delta = (+l15 - +life)/Math.abs(+life)*100;
+    cls = delta>=0 ? 'up' : 'down';                 // last-15d PQ vs lifetime (higher = better)
+    dtxt = (delta>0?'+':'')+delta.toFixed(1)+'%';
+  }
+  const head = `<div class="label"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m12 3 2.5 5.5L20 9l-4 4 1 6-5-3-5 3 1-6-4-4 5.5-.5L12 3Z"/></svg> Product quality (PQ)</div>`;
+  return `<div class="card reveal" style="animation-delay:.143s">${head}
+    <div class="pq-grid">
+      <div class="pq"><div class="pq-k">Lifetime PQ</div><div class="pq-v tnum">${fmt(life)}</div></div>
+      <div class="pq"><div class="pq-k">Last 15 days PQ</div><div class="pq-v tnum">${fmt(l15)}</div><div class="pq-d ${cls}">${dtxt} vs lifetime</div></div>
+    </div>
+    <div class="pq-note">${cls==='down' ? '⚠ Last-15d PQ is below lifetime — product quality slipping; audit catalogue/PDP.' : (cls==='up' ? 'Last-15d PQ holding at or above lifetime.' : 'PQ from card 10773.')}</div>
+  </div>`;
+}
+
 /* ---------- marketplace demand (dashboard 398) ---------- */
 function demandFlag(rc){
   const n = (rc==null||isNaN(+rc)) ? -1 : +rc;
@@ -695,6 +735,10 @@ function demandCard(items, loading){
     const band = (p.demand_price_min!=null&&p.demand_price_max!=null)
       ? `₹${Math.round(+p.demand_price_min)}–₹${Math.round(+p.demand_price_max)}` : '—';
     const our = p.our_price!=null ? '₹'+Math.round(+p.our_price) : '—';
+    const links = (p.link||p.mp_link) ? `<div class="dp-links">
+        ${p.link?`<a class="dp-btn" href="${esc(fixurl(p.link))}" target="_blank" rel="noopener"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>Our product</a>`:''}
+        ${p.mp_link?`<a class="dp-btn mp" href="${esc(fixurl(p.mp_link))}" target="_blank" rel="noopener"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M7 17 17 7M7 7h10v10"/></svg>Marketplace${p.mp_rating_site?' ('+esc(p.mp_rating_site)+')':''}</a>`:''}
+      </div>` : '';
     return `<div class="dprod">
       <div class="dp-main">
         <div class="dp-name">${esc(p.product||p.product_id||'Product')}</div>
@@ -704,6 +748,7 @@ function demandCard(items, loading){
           ${p.contribution_pct!=null?`<span>${(+p.contribution_pct).toFixed(1)}% contrib</span>`:''}
         </div>
         <div class="dp-price">Our ${our} · demand band ${band}</div>
+        ${links}
       </div>
       <div class="dp-flag ${f.cls}" title="${f.hint}">${f.label}</div>
     </div>`;
@@ -824,6 +869,8 @@ function renderSeller(d){
   ${categoryCard(d.category, d.benchmark)}
 
   ${trendCard(d.daily_metrics, d.range)}
+
+  ${pqCard(d.pq)}
 
   ${weeklyPnlCard(d.weekly_pnl)}
 
@@ -980,9 +1027,16 @@ async function generatePlan(){
   try{ data = await apiPlan(STATE.seller, STATE.mode, i); }
   catch(e){ wrap.innerHTML = `<div class="card"><div class="empty">Couldn't generate plan<br/>${esc(e.message)}</div></div>`; return; }
 
+  STATE.lastPlan = data;  // for export
   wrap.innerHTML = `
   <div class="card reveal">
-    <div class="label"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m12 3 1.9 5.8H20l-4.9 3.6L17 18l-5-3.7L7 18l1.9-5.6L4 8.8h6.1L12 3Z"/></svg> Recommended strategy</div>
+    <div class="plan-head">
+      <div class="label" style="margin:0"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m12 3 1.9 5.8H20l-4.9 3.6L17 18l-5-3.7L7 18l1.9-5.6L4 8.8h6.1L12 3Z"/></svg> Recommended strategy</div>
+      <button class="btn-export" onclick="exportPlan()">
+        <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+        Export plan (.txt)
+      </button>
+    </div>
     <div class="tabs" role="tablist">
       ${TABS.map((t,i)=>`<button class="tab" role="tab" aria-selected="${i===0}" id="tab${i}" onclick="switchTab(${i})">
         <svg class="icon icon-sm" viewBox="0 0 24 24">${t.icon}</svg>${t.label}</button>`).join('')}
@@ -993,6 +1047,45 @@ async function generatePlan(){
       ${API_BASE?'Generated live by Claude':'Sample plan — connect backend for live AI'}
     </div>
   </div>`;
+}
+
+function exportPlan(){
+  const d = STATE.seller || {}, plan = STATE.lastPlan;
+  if (!plan) return;
+  const PRI = {high:'HIGH', med:'MEDIUM', low:'LOW'};
+  const line = '='.repeat(64);
+  const L = [];
+  L.push('NEXT PLAN OF ACTIONS');
+  L.push(line);
+  L.push('Company     : ' + (d.company || '-'));
+  L.push('Seller ID   : ' + (d.seller_id || '-'));
+  L.push('Track       : ' + (STATE.mode === 'hits' ? 'HITS Troubleshoot' : '1k-5k Troubleshoot'));
+  if (d.category && d.category.l1) L.push('Category    : ' + [d.category.l1,d.category.l2,d.category.l3].filter(Boolean).join(' > '));
+  if (d.range) L.push('Window      : ' + d.range.start + ' to ' + d.range.end);
+  L.push('Generated   : ' + new Date().toLocaleString());
+  L.push('Source      : ' + (API_BASE ? 'Claude (live)' : 'sample'));
+  L.push('');
+  TABS.forEach(t=>{
+    const items = plan[t.key] || [];
+    L.push(line);
+    L.push(t.label.toUpperCase() + '  (' + items.length + ')');
+    L.push(line);
+    if (!items.length){ L.push('  (no actions)'); L.push(''); return; }
+    items.forEach((a,idx)=>{
+      L.push((idx+1) + '. [' + (PRI[a.p]||'MEDIUM') + '] ' + (a.t||''));
+      if (a.d){ (a.d.match(/.{1,88}(\s|$)/g)||[a.d]).forEach(w=>L.push('     ' + w.trim())); }
+      L.push('');
+    });
+  });
+  L.push(line);
+  L.push('Meta Account Troubleshoot');
+  const blob = new Blob([L.join('\n')], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const safe = (d.company || d.seller_id || 'seller').toString().replace(/[^a-z0-9]+/gi,'_').slice(0,40);
+  a.href = url; a.download = 'plan_of_action_' + safe + '.txt';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
 }
 function renderActions(items){
   if(!items||!items.length) return '<div class="empty">No actions for this category.</div>';
@@ -1014,6 +1107,7 @@ function switchTab(i){
 
 /* ---------- helpers ---------- */
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fixurl(u){ u=String(u||'').trim(); return /^https?:\/\//i.test(u)?u:'https://'+u; }
 
 /* =========================================================================
    MOCK DATA — used only when no backend is connected (sample mode).
@@ -1036,7 +1130,8 @@ function mockSeller(id, mode, start, end){
     metrics.push({ date:dt.toISOString().slice(0,10),
       spend:r(1500,4000)+idx*40, impression:r(40000,90000), clicks:r(400,1200),
       cpm:+(180+dip*70+idx*2).toFixed(0), ctr:+(1.6-dip*0.7+(seed%3)*0.1).toFixed(2),
-      orders:r(8,40), gmv:r(8000,40000), s_gmv:+(0.18+dip*0.07).toFixed(2) }); }
+      orders:r(8,40), gmv:r(8000,40000), s_gmv:+(0.18+dip*0.07).toFixed(2),
+      lifetime_avg_pq:+(4.0+(seed%5)*0.1).toFixed(2), last_15d_avg_pd:+(4.0+(seed%5)*0.1-dip*0.5).toFixed(2) }); }
   const midDate=metrics[7].date;
   const changelog=[
     {date:midDate+'T11:20:00', area:'Website', category:'Website Other', field:'NavigationBar Link Changed', from:'/collection/all', to:'/collection/new', by:'Mahesh K', user_type:'seller'},
@@ -1050,13 +1145,13 @@ function mockSeller(id, mode, start, end){
     business:{company:['Rudra Rage','Lumière Home','Nova Apparel','Bloom Beauty','PeakFit Gear'][seed%5],website:'www.example.com',contact:'9'+r(100000000,899999999),offers:['Buy 1 Get 1','Flat 20% off','Free shipping',null][seed%4],products_at_go_live:r(20,300),aov_at_gl:r(300,1400)+0.9,cogs_at_gl:r(10,45)},
     category:{l1:l1,l2:sub[0],l3:sub[1]}, benchmark:BENCHMARKS[l1],
     range:{start:start||metrics[0].date, end:end||metrics[metrics.length-1].date},
-    daily_metrics:metrics, changelog:changelog,
+    daily_metrics:metrics, pq:{lifetime:metrics[metrics.length-1].lifetime_avg_pq, last_15d:metrics[metrics.length-1].last_15d_avg_pd}, changelog:changelog,
     weekly_pnl:{best_source:'new_pnl', w1_spend:r(15000,30000), w2_spend:r(15000,32000), w3_spend:r(18000,38000), w1_pnl:+(r(20,60)/10).toFixed(1), w2_pnl:+(r(-10,30)/10).toFixed(1), w3_pnl:+(r(-60,10)/10).toFixed(1)},
     last_ts:{total_ts_done:r(2,10), last_ts_date:(end||metrics[metrics.length-1].date), ts_type:'manual_ts', last_7d_meta_spend:r(3000,9000), last_ts_actions:'Educate seller to not do a lot of Cancellation. |DETAILS| Seller Cancellation (8.82%) between last week is above the threshold of 5%. Reduce cancellations to protect delivery and ROAS.'},
     demand_products:[
-      {product:'Embroidered Anarkali Kurti', product_id:'WE-ANRK-01', orders_30d:r(40,120), contribution_pct:r(8,18), our_price:1099, our_cost:480, mp_rating_count:r(140,900), mp_rating_site:'amazon', demand_price_min:899, demand_price_max:1499, demand_price_avg:1180, pq_score:4.3, is_unique:false},
-      {product:'Cotton Straight Pant', product_id:'WE-PANT-04', orders_30d:r(20,60), contribution_pct:r(4,9), our_price:699, our_cost:300, mp_rating_count:r(20,60), mp_rating_site:'flipkart', demand_price_min:599, demand_price_max:899, demand_price_avg:740, pq_score:4.0, is_unique:false},
-      {product:'Designer Dupatta (new SKU)', product_id:'WE-DUP-09', orders_30d:r(2,10), contribution_pct:r(1,3), our_price:499, our_cost:210, mp_rating_count:r(0,6), mp_rating_site:null, demand_price_min:null, demand_price_max:null, demand_price_avg:null, pq_score:null, is_unique:true}
+      {product:'Embroidered Anarkali Kurti', product_id:'WE-ANRK-01', link:'https://sellerstore.com/p/anarkali-01', mp_link:'https://amazon.in/dp/B0ANRK', orders_30d:r(40,120), contribution_pct:r(8,18), our_price:1099, our_cost:480, mp_rating_count:r(140,900), mp_rating_site:'amazon', demand_price_min:899, demand_price_max:1499, demand_price_avg:1180, pq_score:4.3, is_unique:false},
+      {product:'Cotton Straight Pant', product_id:'WE-PANT-04', link:'https://sellerstore.com/p/pant-04', mp_link:'https://flipkart.com/p/pant', orders_30d:r(20,60), contribution_pct:r(4,9), our_price:699, our_cost:300, mp_rating_count:r(20,60), mp_rating_site:'flipkart', demand_price_min:599, demand_price_max:899, demand_price_avg:740, pq_score:4.0, is_unique:false},
+      {product:'Designer Dupatta (new SKU)', product_id:'WE-DUP-09', link:'https://sellerstore.com/p/dupatta-09', mp_link:null, orders_30d:r(2,10), contribution_pct:r(1,3), our_price:499, our_cost:210, mp_rating_count:r(0,6), mp_rating_site:null, demand_price_min:null, demand_price_max:null, demand_price_avg:null, pq_score:null, is_unique:true}
     ]
   }),700));
 }
