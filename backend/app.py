@@ -44,13 +44,13 @@ CLAUDE_MODEL       = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")  # or c
 MAPPING_CARD  = 7753
 BUSINESS_CARD = 10353
 BUSINESS_BACKUP_CARD = 10352   # lighter Category Intelligence card — website/company/contact backup
-CATEGORY_CARD = 10362   # db23 — REQUIRES seller_id (can't bulk); fetched per-seller
-CATEGORY_SELLER_PARAM = "232ba3d0-4861-4ebd-8775-5f8b9d488737"
+CATEGORY_CARD = 3773    # "seller level category mapping - L2" (db6, seller-level, bulk-cacheable).
+                        # Replaces 10362, which is broken upstream (references deleted cross-db card 3757).
 METRICS_CARD  = 10773   # daily spend/CPM/CTR/s_gmv time series (all HIT sellers, no params)
 WEEKLY_PNL_CARD = 11011 # week-1/2/3 spend + P&L per seller (no params)
 LAST_TS_CARD    = 10189 # last troubleshoot details + actions per seller (optional seller filter)
-# Bulk-cached cards (pulled param-less = all sellers in one scan). 10362 is NOT here.
-CARDS = (MAPPING_CARD, BUSINESS_CARD, BUSINESS_BACKUP_CARD,
+# Bulk-cached cards (pulled param-less = all sellers in one scan).
+CARDS = (MAPPING_CARD, BUSINESS_CARD, BUSINESS_BACKUP_CARD, CATEGORY_CARD,
          METRICS_CARD, WEEKLY_PNL_CARD, LAST_TS_CARD)
 METRICS_KEEP_DAYS = 45  # trim each seller's series to the last N rows in the cache
 
@@ -578,12 +578,7 @@ def seller(req: SellerReq):
         return None
     pq = {"lifetime": _clean(_latest("lifetime_avg_pq")), "last_15d": _clean(_latest("last_15d_avg_pd"))}
 
-    # category is a quick per-seller lookup (kept inline). changelog + demand are SLOW
-    # (some Metabase queries ~40s) so they load lazily via /api/insights, not here.
-    try:
-        cat = _get_category(sid) or {}
-    except Exception:
-        cat = {}
+    cat = lookup(CATEGORY_CARD)   # seller-level category (card 3773), from bulk cache
     changelog = []          # loaded via POST /api/insights
     demand_products = []     # loaded via POST /api/insights
 
@@ -634,13 +629,13 @@ def seller(req: SellerReq):
                               (BUSINESS_BACKUP_CARD if _clean(b2.get("website")) else None)),
     }
 
-    # category levels (10362): L1=primary_l2, L2=primary_l3, L3=primary_l4
-    l1 = _clean(cat.get("primary_l2"))
-    l2 = _clean(cat.get("primary_l3"))
-    l3 = _clean(cat.get("primary_l4"))
+    # category levels (card 3773): L1=primary_category_l1, L2=primary_l2, L3=tertiary_l3
+    l1 = _clean(cat.get("primary_category_l1"))
+    l2 = _clean(cat.get("primary_l2"))
+    l3 = _clean(cat.get("tertiary_l3"))
     category = {"l1": l1, "l2": l2, "l3": l3}
-    # hard-coded benchmark for the seller's Category Level 1 (primary_l2)
-    benchmark = BENCHMARKS.get(l1) if l1 else None
+    # hard-coded benchmark keyed on primary_l2 (the CSV benchmark key)
+    benchmark = BENCHMARKS.get(l2) if l2 else None
 
     # derived readiness status (honest: based only on fields we actually have)
     if mapping["go_live"] == "Yes":

@@ -625,7 +625,7 @@ function categoryCard(cat, bm){
   let bmHtml = '';
   if (bm){
     bmHtml = `
-      <div class="bm-head"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-4 4"/></svg> Category benchmark · <b>${esc(cat.l1||'')}</b></div>
+      <div class="bm-head"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-4 4"/></svg> Category benchmark · <b>${esc(cat.l2||'')}</b></div>
       <div class="bm-grid">
         <div class="bm"><div class="k">RTO</div><div class="v tnum">${pct(bm.rto)}</div></div>
         <div class="bm"><div class="k">Cancellation</div><div class="v tnum">${pct(bm.canc)}</div></div>
@@ -634,8 +634,8 @@ function categoryCard(cat, bm){
         <div class="bm"><div class="k">Logistics cost</div><div class="v tnum">${bm.logs==null?'—':'₹'+Number(bm.logs).toLocaleString('en-IN')}</div></div>
         <div class="bm"><div class="k">Benchmark AOV</div><div class="v tnum">${bm.aov==null?'—':'₹'+Number(bm.aov).toLocaleString('en-IN',{maximumFractionDigits:0})}</div></div>
       </div>`;
-  } else if (cat.l1){
-    bmHtml = `<div class="bm-head">No hard-coded benchmark for <b>${esc(cat.l1)}</b>.</div>`;
+  } else if (cat.l2){
+    bmHtml = `<div class="bm-head">No hard-coded benchmark for <b>${esc(cat.l2)}</b>.</div>`;
   }
   return `<div class="card reveal" style="animation-delay:.13s">
     <div class="label"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-3H5a2 2 0 0 0-2 3Z"/></svg> Category &amp; benchmarks</div>
@@ -1171,7 +1171,7 @@ function mockSeller(id, mode, start, end){
   const names=['Aisha Khan','Rohan Mehta','Simran Kaur','Vikram Rao','Neha Gupta','Arjun Nair','Priya Shah','Karan Bedi'];
   const pick=n=>names[(seed+n)%names.length];
   const l3map={'mens-accessories':['jewellery','kada'],'womens-clothing':['ethnic-wear','kurti'],'skincare':['face-care','serum'],'home-decor':['wall-decor','clock'],'mens-footwear':['casual','sneakers']};
-  const l1keys=Object.keys(BENCHMARKS); const l1=l1keys[seed%l1keys.length]; const sub=l3map[l1]||['general','standard'];
+  const l2keys=Object.keys(BENCHMARKS); const l2cat=l2keys[seed%l2keys.length]; const sub=l3map[l2cat]||['general','standard'];
   // sample 14-day series with a deliberate CTR dip + CPM rise mid-window (to demo correlation)
   const e = end ? new Date(end) : new Date(); const days=14;
   const metrics=[]; for(let i=days-1;i>=0;i--){ const dt=new Date(e); dt.setDate(e.getDate()-i);
@@ -1192,7 +1192,7 @@ function mockSeller(id, mode, start, end){
     status: [['Live','s-ok'],['Live · unassigned','s-warn'],['Not live yet','s-warn']][seed%3],
     mapping:{gc:pick(0),gm:pick(1),kae:pick(2),kam:pick(3),growth_lead:pick(4),golive_poc:pick(5),onboarding_poc:null,assistant_manager:null,profitability_am:null,go_live:seed%3===2?'No':'Yes'},
     business:{company:['Rudra Rage','Lumière Home','Nova Apparel','Bloom Beauty','PeakFit Gear'][seed%5],website:'www.example.com',contact:'9'+r(100000000,899999999),offers:['Buy 1 Get 1','Flat 20% off','Free shipping',null][seed%4],products_at_go_live:r(20,300),aov_at_gl:r(300,1400)+0.9,cogs_at_gl:r(10,45)},
-    category:{l1:l1,l2:sub[0],l3:sub[1]}, benchmark:BENCHMARKS[l1],
+    category:{l1:'clothing-shoes-and-accessories',l2:l2cat,l3:sub[0]}, benchmark:BENCHMARKS[l2cat],
     range:{start:start||metrics[0].date, end:end||metrics[metrics.length-1].date},
     daily_metrics:metrics, pq:{lifetime:metrics[metrics.length-1].lifetime_avg_pq, last_15d:metrics[metrics.length-1].last_15d_avg_pd}, changelog:changelog,
     weekly_pnl:{best_source:'new_pnl', w1_spend:r(15000,30000), w2_spend:r(15000,32000), w3_spend:r(18000,38000), w1_pnl:+(r(20,60)/10).toFixed(1), w2_pnl:+(r(-10,30)/10).toFixed(1), w3_pnl:+(r(-60,10)/10).toFixed(1)},
