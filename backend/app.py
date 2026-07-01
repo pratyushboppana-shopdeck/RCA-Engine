@@ -511,13 +511,8 @@ def home():
 
 @app.get("/api/health")
 def health():
-    cache = {}
-    for cid in CARDS:
-        c = _bulk.get(cid) or _disk_read(cid) or {}
-        cache[str(cid)] = {
-            "sellers": len(c.get("by_id", {})),
-            "age_hours": round((time.time() - c.get("ts", 0)) / 3600, 1) if c.get("ts") else None,
-        }
+    # lightweight: report ONLY in-memory cache (no disk reads) so this stays fast on cold start
+    cache = {str(cid): len((_bulk.get(cid) or {}).get("by_id", {})) for cid in CARDS}
     return {
         "ok": True,
         "metabase": bool(MB_USER and MB_PASS),
@@ -674,6 +669,8 @@ PLAN_SCHEMA = {
         "website":  {"type": "array", "items": {"$ref": "#/$defs/action"}},
         "campaign": {"type": "array", "items": {"$ref": "#/$defs/action"}},
         "outside":  {"type": "array", "items": {"$ref": "#/$defs/action"}},
+        "scaleup":  {"type": "array", "items": {"$ref": "#/$defs/action"},
+                     "description": "2K->5K scaling plan (1k-5k track only; empty for HITS)"},
     },
     "required": ["website", "campaign", "outside"],
     "$defs": {
@@ -688,6 +685,28 @@ PLAN_SCHEMA = {
         }
     },
 }
+
+# Condensed 2K->5K Scaling Playbook (from ShopDeck playbook doc) — injected for the
+# 1k-5k track so the scaleup plan follows the real methodology, not generic advice.
+SCALEUP_PLAYBOOK = """2K->5K SCALING PLAYBOOK (for already-profitable/HIT sellers at ~1-2K/day, scaling to 5K/day profitably):
+
+PRECONDITIONS (confirm before scaling): 2 full weeks profitable post-HIT; Marketing% below breakeven; RTO within category norm; stock can absorb 2-3x volume. If any fail -> fix first, don't scale.
+
+PHASE 1 DIAGNOSIS:
+- Product spend concentration: >=60-65% on 1 product = dominant (single-product RISK; build a 2nd product before 5K); 40-60% across 2 = push both; <40% distributed = healthy. Count UNIQUE products (variants=1). <=2 unique = high risk at 5K.
+- Audience: LAL running -> open audience keeping Age/Gender/Region (don't just raise LAL budget, it exhausts); heavy restrictions -> remove 1-2 filters every 48h ONLY if RTO ok; already Open -> skip audience, focus creatives. RTO GATE: if campaign RTO >20% above account avg, DO NOT open audience; fix RTO/NDR first.
+- Stock gate: OOS -> pause creatives; Low -> confirm restock ETA; OK -> proceed. Check before every new creative + budget increase.
+
+PHASE 2 CAMPAIGN MATRIX: launch NEW campaigns in parallel (never touch the HIT campaign). Budgets: Rs250/creative (banner+video combo), Rs500/new creative or product test, Rs2000 minimum spend before judging a new product. 1 dominant product -> new creative same product Rs500 + new-product creative Rs500. 2 products -> push the lesser-spend product's creative in same audience. >10 products -> isolate winners into own campaigns.
+Verdict logic: campaign S:GMV% < account avg = over-performing (scale it); > avg = under-performing (pause/restructure); no sales after Rs2000 = stop; CTR<1% = creative/hook issue; stable CPA 2-3 days = scale signal.
+
+PHASE 3 SCALING 2K->5K: only after 2 proven campaigns. Scale 20-30%/day (never jump 2K->5K in one day), spread across MULTIPLE campaigns (never all budget in 1), check Marketing% daily, confirm stock before each increase, keep HIT campaign as anchor. If Marketing% > breakeven for 2 consecutive days -> pause scaling and diagnose. Don't change creative + budget at the same time. Don't scale into a seasonal spike (may be a false HIT).
+
+RED FLAGS: OOS mid-scale (algorithm shifts to inferior products, Marketing% spikes) -> build 2nd product + stock alerts; RTO signature (Marketing% high but CPM/CTR/C2PR fine, W-2 loss) -> exclude high-RTO states (J&K, Bihar, UP, Assam), NDR calling if RTO>30%; False HIT (profitable only during festival/1 product) -> don't allocate scale budget, re-validate in 2 weeks.
+
+BEYOND 5K (HIT2 = 2 profitable weeks at 5K): retargeting layer at ~20% of budget (7d/14d/30d warm, CPP where CTR>4%, Website Visitor for 2K+ weekly visitors, Purchase LLA for 50+ lifetime purchases).
+
+ICP: High ICP (>=7) + High Spend = scale fast (best success ~37%); Low ICP + Low Spend = hold & validate (~20%). More unique products + one proven creative format + RTO in range + responsive seller/stock = the pattern of accounts that scaled."""
 
 
 CSV_CHAR_LIMIT = 60000  # cap each CSV sent to the model (keeps token use sane)
@@ -765,6 +784,28 @@ def plan(req: PlanReq):
         "Priority 'high' = money-losing blocker or a change that caused a drop, 'med' = clear lever, "
         "'low' = nice-to-have."
     )
+
+    is_growth = req.mode != "hits"
+    if is_growth:
+        sys_prompt += (
+            "\n\nThis seller is on the 1k-5k SCALING track (already profitable at ~1-2K/day, goal 5K/day "
+            "profitably). In ADDITION to the 3 categories, produce a 'scaleup' category (4-6 actions) that "
+            "applies the following ShopDeck 2K->5K playbook to THIS seller's actual data (product "
+            "concentration from demand_products, weekly P&L trajectory, buckets, RTO/COGS, PQ). Be specific: "
+            "name the diagnosis, the exact next campaign moves, budget steps (Rs500 tests, Rs2000 eval, "
+            "20-30%/day), and the gates (stock, RTO, single-product risk).\n\n" + SCALEUP_PLAYBOOK
+        )
+
+    cats = (
+        "1. website  — landing page / storefront / pixel / catalogue / CRO fixes\n"
+        "2. campaign — Meta ad structure, creative, audience, budget, bidding actions\n"
+        "3. outside  — out-of-the-box / retention / incentive / margin / creator plays\n"
+    )
+    if is_growth:
+        cats += "4. scaleup  — the 2K->5K scaling plan per the playbook (diagnosis -> matrix -> scale gates)\n"
+    else:
+        cats += "Return an empty 'scaleup' array (not applicable to the HITS track).\n"
+
     user_prompt = (
         f"Seller track: {track}.\n"
         f"Website: {website or '(not available)'}\n\n"
@@ -774,14 +815,12 @@ def plan(req: PlanReq):
         + _csv_block("Meta ad-account metrics", req.meta_csv)
         + "".join(_csv_block(f"Additional: {f.name}", f.content) for f in (req.extra_csv or []))
         + "\nAnalyse the above deeply, then call submit_plan with the action plan across:\n"
-        "1. website  — landing page / storefront / pixel / catalogue / CRO fixes\n"
-        "2. campaign — Meta ad structure, creative, audience, budget, bidding actions\n"
-        "3. outside  — out-of-the-box / retention / incentive / margin / creator plays"
+        + cats
     )
     try:
         msg = client.messages.create(
             model=CLAUDE_MODEL,
-            max_tokens=4000,
+            max_tokens=5200 if is_growth else 4000,
             system=sys_prompt,
             tools=[{
                 "name": "submit_plan",
