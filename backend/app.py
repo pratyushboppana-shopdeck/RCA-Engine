@@ -844,10 +844,71 @@ ICP: High ICP (>=7) + High Spend = scale fast (best success ~37%); Low ICP + Low
 CSV_CHAR_LIMIT = 35000  # cap each CSV sent to the model (keeps token use + latency sane)
 
 
+def _summarize_csv(text):
+    """Big row-level CSVs (e.g. Meta breakdown, 1000s of rows) are aggregated by campaign/ad-set
+    so the model gets a clean ~30-row digest instead of drowning in raw rows (which caused runaway output)."""
+    import csv as _c
+    import io
+    text = (text or "").strip()
+    if not text:
+        return ""
+    try:
+        rows = list(_c.reader(io.StringIO(text)))
+    except Exception:
+        return text[:CSV_CHAR_LIMIT]
+    if len(rows) < 2:
+        return text[:CSV_CHAR_LIMIT]
+    header, data = rows[0], rows[1:]
+    if len(data) <= 60:
+        return text[:CSV_CHAR_LIMIT]  # small enough already
+
+    def num(v):
+        try:
+            return float(str(v).replace(",", "").replace("%", "").replace("₹", "").strip())
+        except (TypeError, ValueError):
+            return None
+
+    gi = next((i for i, h in enumerate(header)
+               if any(k in str(h).lower() for k in ("campaign", "ad set", "adset", "ad name"))), None)
+    if gi is None:
+        out = [",".join(header)] + [",".join(r) for r in data[:60]]
+        return "\n".join(out) + f"\n...[{len(data)} rows total; first 60 shown]"
+
+    sample = data[:300]
+    # sum only ADDITIVE metrics; drop rate/ratio columns (summing CPM/CTR/ROAS is meaningless —
+    # the model derives rates from the summed spend/impressions/results instead)
+    RATE_HINTS = ("cpm", "ctr", "roas", "rate", "cost per", "c2pr", "frequency", "%", "per 1,000", "budget type")
+    numeric_cols = [i for i in range(len(header)) if i != gi
+                    and not any(h in str(header[i]).lower() for h in RATE_HINTS)
+                    and sum(1 for r in sample if i < len(r) and num(r[i]) is not None) > len(sample) * 0.5]
+    agg = {}
+    for r in data:
+        if gi >= len(r):
+            continue
+        g = r[gi] or "(blank)"
+        a = agg.setdefault(g, {"__rows": 0})
+        a["__rows"] += 1
+        for i in numeric_cols:
+            if i < len(r):
+                v = num(r[i])
+                if v is not None:
+                    a[i] = a.get(i, 0.0) + v
+    key = numeric_cols[0] if numeric_cols else None
+    groups = sorted(agg.items(), key=lambda kv: kv[1].get(key, 0) if key is not None else kv[1]["__rows"], reverse=True)[:30]
+    out_header = [header[gi], "rows"] + [header[i] for i in numeric_cols]
+    lines = [",".join('"' + str(h) + '"' for h in out_header)]
+    for g, a in groups:
+        row = [g, a["__rows"]] + [round(a.get(i, 0.0), 2) for i in numeric_cols]
+        lines.append(",".join('"' + str(x) + '"' for x in row))
+    note = f"...[aggregated {len(data)} rows into {len(agg)} campaigns; top {len(groups)} by {header[key] if key is not None else 'row count'}]"
+    return "\n".join(lines) + "\n" + note
+
+
 def _csv_block(title, text):
     text = (text or "").strip()
     if not text:
         return f"### {title}\n(none provided)\n"
+    text = _summarize_csv(text)
     truncated = ""
     if len(text) > CSV_CHAR_LIMIT:
         text = text[:CSV_CHAR_LIMIT]
@@ -1139,7 +1200,14 @@ def plan(req: PlanReq):
 
     for block in msg.content:
         if getattr(block, "type", None) == "tool_use" and block.name == "submit_plan":
-            return block.input
+            out = block.input
+            # defensive cap: never let a runaway (e.g. 1000+ items) reach the UI
+            for k in ("website", "campaign", "outside", "scaleup"):
+                if isinstance(out.get(k), list):
+                    out[k] = out[k][:8]
+            if isinstance(out.get("top_priorities"), list):
+                out["top_priorities"] = out["top_priorities"][:6]
+            return out
     raise HTTPException(502, "Claude did not return a structured plan")
 
 
