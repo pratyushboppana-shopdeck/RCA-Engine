@@ -528,6 +528,7 @@ class PlanReq(BaseModel):
     digest: str = ""           # analyst output, fed to specialist/synth
     category: str = ""         # for stage=specialist: website|campaign|outside|scaleup
     drafts: dict = {}          # for stage=synth: {category: [actions]}
+    prior_plans: list = []     # AI's own past plans for this seller (memory), most recent first
 
 
 _INDEX_PATHS = [
@@ -852,6 +853,21 @@ def _tool_call(client, system, user, schema, max_tokens=1600, tool="submit", mod
     raise HTTPException(502, "no structured output from Claude")
 
 
+def _prior_block(prior):
+    """Compact text of the AI's own past plans for this seller (memory)."""
+    if not prior:
+        return ""
+    lines = ["=== THE AI'S OWN PAST PLANS FOR THIS SELLER (most recent first) ==="]
+    for p in prior[:5]:
+        if not isinstance(p, dict):
+            continue
+        lines.append(f"[{p.get('date', '?')}] {str(p.get('summary', ''))[:220]}")
+        tp = p.get('top_priorities') or []
+        if tp:
+            lines.append("  do-first: " + " | ".join(str(x)[:90] for x in tp[:5]))
+    return "\n".join(lines) + "\n"
+
+
 def _data_block(req, website):
     return (
         f"Website: {website or '(not available)'}\n\n"
@@ -884,12 +900,16 @@ def plan(req: PlanReq):
             "contribution margin & net profit; RTO signal; weekly P&L trajectory + bucket status; product "
             "concentration & demand-validated winners (mp ratings); any changelog change that correlates with "
             "a metric drop (with dates); PQ trend; and the 4-6 biggest risks & opportunities. No fluff, no "
-            "recommendations yet — just the facts and verdicts. Use short bullet lines."
+            "recommendations yet — just the facts and verdicts. Use short bullet lines. "
+            "If PAST AI PLANS are shown, add a short 'FOLLOW-UPS' section flagging which prior recommendations "
+            "the current data suggests are done/resolved vs still open."
         )
+        prior = _prior_block(req.prior_plans)
+        user_content = _data_block(req, website) + ("\n" + prior if prior else "")
         try:
             digest = "".join(b.text for b in client.messages.create(
-                model=ANALYST_MODEL, max_tokens=1600, system=sysp,
-                messages=[{"role": "user", "content": _data_block(req, website)}]).content
+                model=ANALYST_MODEL, max_tokens=1700, system=sysp,
+                messages=[{"role": "user", "content": user_content}]).content
                 if getattr(b, "type", None) == "text")
         except Exception as e:
             raise HTTPException(502, f"Claude error (analyst): {e}")
@@ -927,9 +947,15 @@ def plan(req: PlanReq):
             "ACROSS ALL categories, in order, each as one short imperative line prefixed with its area "
             "(e.g. 'Campaign: cut the Open campaign at 2.2x — below break-even'). Return via submit."
         )
+        if req.prior_plans:
+            sysp += (" IMPORTANT: past AI plans for this seller are provided below. In the summary, note the "
+                     "PROGRESS since last time (which prior recommendations look done/resolved vs still open). "
+                     "STILL return 3-5 top_priorities; for items repeated from a past plan, escalate them to a "
+                     "stronger/next step rather than restating them verbatim.")
         user = (
             f"Seller track: {track}.\n\n=== ANALYST DIGEST ===\n{req.digest}\n\n"
-            f"=== SPECIALIST DRAFTS (JSON) ===\n{json.dumps(req.drafts, indent=2)}"
+            f"=== SPECIALIST DRAFTS (JSON) ===\n{json.dumps(req.drafts, indent=2)}\n\n"
+            + _prior_block(req.prior_plans)
         )
         return _tool_call(client, sysp, user, SYNTH_SCHEMA, max_tokens=1200, tool="submit", model=SYNTH_MODEL)
 

@@ -344,6 +344,9 @@
   .chip-x{border:none;background:var(--line);color:var(--txt-2);width:17px;height:17px;border-radius:50%;cursor:pointer;font-size:13px;line-height:1;display:grid;place-items:center;padding:0;transition:var(--fast)}
   .chip-x:hover{background:var(--bad);color:#fff}
   .gate-hint{text-align:center;font-size:12.5px;color:var(--txt-3);margin-top:12px}
+  .mem-note{text-align:center;font-size:12.5px;color:var(--txt-2);margin-top:10px}
+  .mem-note b{color:#a5b4fc}
+  .mem-note .icon{color:#a5b4fc}
 
   /* ---------- plan ---------- */
   .plancta{display:flex;justify-content:center;margin-top:24px}
@@ -501,6 +504,28 @@ const API_BASE = (() => {
 })();
 
 const STATE = { mode:'hits', seller:null, live:false, inputs:null };
+
+/* ---------- AI memory (per-seller plan history, localStorage) ---------- */
+function memKey(sid){ return 'ts_planhist_' + (sid || 'unknown'); }
+function getPriorPlans(sid){
+  try{ return JSON.parse(localStorage.getItem(memKey(sid)) || '[]'); }catch(e){ return []; }
+}
+function savePlanToMemory(sid, data){
+  try{
+    const hist = getPriorPlans(sid);
+    const titles = {};
+    ['website','campaign','outside','scaleup'].forEach(k=>{ titles[k] = (data[k]||[]).map(a=>a.t); });
+    hist.unshift({ date:new Date().toISOString().slice(0,10), mode:STATE.mode,
+      summary:data.summary||'', top_priorities:data.top_priorities||[], titles });
+    localStorage.setItem(memKey(sid), JSON.stringify(hist.slice(0,5)));  // keep last 5
+  }catch(e){}
+}
+function updateMemNote(sid){
+  const el = document.getElementById('memNote'); if(!el) return;
+  const prior = getPriorPlans(sid);
+  if(!prior.length){ el.innerHTML = ''; return; }
+  el.innerHTML = `<svg class="icon icon-sm" viewBox="0 0 24 24" style="vertical-align:-3px"><path d="M12 2a5 5 0 0 0-5 5v1a4 4 0 0 0-1 7 4 4 0 0 0 6 3 4 4 0 0 0 6-3 4 4 0 0 0-1-7V7a5 5 0 0 0-5-5Z"/></svg> AI remembers <b>${prior.length}</b> past plan${prior.length>1?'s':''} for this seller (last: ${esc(prior[0].date)}) — the next plan builds on them.`;
+}
 
 /* ---------- source indicator ---------- */
 (function initSource(){
@@ -979,6 +1004,7 @@ function renderSeller(d){
     </button>
   </div>
   <div class="gate-hint" id="gateHint"></div>
+  <div class="mem-note" id="memNote"></div>
 
   <div id="plan"></div>`;
   document.getElementById('results').innerHTML = html;
@@ -995,6 +1021,7 @@ function renderSeller(d){
     }
   }
   updateGate();
+  updateMemNote(d.seller_id || '');   // show how many past AI plans exist for this seller
   loadInsights(d);   // lazily load changelog + demand (slow queries) without blocking render
 }
 
@@ -1151,6 +1178,8 @@ async function generatePlan(){
   }
   STATE.lastPlan = data;  // for export
   renderPlanCard(wrap, data);
+  savePlanToMemory((STATE.seller && STATE.seller.seller_id) || '', data);  // remember for next time
+  updateMemNote((STATE.seller && STATE.seller.seller_id) || '');
   updateFunds();  // refresh remaining AI budget after the multi-agent run
 }
 
@@ -1163,11 +1192,12 @@ async function runAgents(i, prog){
     return r.json();
   };
   const cats = planTabs().map(t=>t.key);
-  // 1) analyst reads the raw data once
-  prog('Agent 1 · Analyst reading your P&L + Meta data…');
+  const prior = getPriorPlans((STATE.seller && STATE.seller.seller_id) || '');
+  // 1) analyst reads the raw data once (+ the AI's own past plans for this seller)
+  prog(prior.length ? `Agent 1 · Analyst reviewing data + ${prior.length} past plan(s)…` : 'Agent 1 · Analyst reading your P&L + Meta data…');
   const {digest} = await post({stage:'analyst', seller:STATE.seller, mode:STATE.mode,
     website:i.website||'', pnl_csv:i.pnl?i.pnl.content:'', meta_csv:i.meta?i.meta.content:'',
-    extra_csv:(i.extra||[]).map(f=>({name:f.name,content:f.content}))});
+    extra_csv:(i.extra||[]).map(f=>({name:f.name,content:f.content})), prior_plans:prior});
   // 2) specialists in parallel (one per category tab)
   prog(`Agents 2–${cats.length+1} · ${cats.length} specialists working in parallel…`);
   const results = await Promise.all(cats.map(c =>
@@ -1181,7 +1211,7 @@ async function runAgents(i, prog){
   // 3) synthesizer correlates (categories stay owned by specialists)
   prog('Final agent · Correlating & prioritizing across all areas…');
   let synth = {summary:'', top_priorities:[]};
-  try{ synth = await post({stage:'synth', mode:STATE.mode, digest, drafts}); }catch(e){ /* keep drafts even if synth fails */ }
+  try{ synth = await post({stage:'synth', mode:STATE.mode, digest, drafts, prior_plans:prior}); }catch(e){ /* keep drafts even if synth fails */ }
   return {
     website: drafts.website||[], campaign: drafts.campaign||[],
     outside: drafts.outside||[], scaleup: drafts.scaleup||[],
