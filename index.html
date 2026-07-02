@@ -505,26 +505,42 @@ const API_BASE = (() => {
 
 const STATE = { mode:'hits', seller:null, live:false, inputs:null };
 
-/* ---------- AI memory (per-seller plan history, localStorage) ---------- */
+/* ---------- AI memory (per-seller plan history) ----------
+   Server-shared via Upstash (POST/GET /api/memory) when configured; else localStorage.
+   localStorage is always written too, as a cache/offline fallback. */
 function memKey(sid){ return 'ts_planhist_' + (sid || 'unknown'); }
-function getPriorPlans(sid){
+function getLocalPlans(sid){
   try{ return JSON.parse(localStorage.getItem(memKey(sid)) || '[]'); }catch(e){ return []; }
 }
-function savePlanToMemory(sid, data){
-  try{
-    const hist = getPriorPlans(sid);
-    const titles = {};
-    ['website','campaign','outside','scaleup'].forEach(k=>{ titles[k] = (data[k]||[]).map(a=>a.t); });
-    hist.unshift({ date:new Date().toISOString().slice(0,10), mode:STATE.mode,
-      summary:data.summary||'', top_priorities:data.top_priorities||[], titles });
-    localStorage.setItem(memKey(sid), JSON.stringify(hist.slice(0,5)));  // keep last 5
-  }catch(e){}
+function compactPlan(data){
+  const titles = {};
+  ['website','campaign','outside','scaleup'].forEach(k=>{ titles[k] = (data[k]||[]).map(a=>a.t); });
+  return { date:new Date().toISOString().slice(0,10), mode:STATE.mode,
+           summary:data.summary||'', top_priorities:data.top_priorities||[], titles };
 }
-function updateMemNote(sid){
+async function memLoad(sid){
+  if(API_BASE){
+    try{
+      const r = await fetch(API_BASE+'/api/memory?seller_id='+encodeURIComponent(sid),{cache:'no-store'});
+      const j = await r.json();
+      if(j && j.available && Array.isArray(j.plans)) return j.plans;   // team-shared source of truth
+    }catch(e){}
+  }
+  return getLocalPlans(sid);
+}
+async function memSave(sid, data){
+  const c = compactPlan(data);
+  try{ const h=getLocalPlans(sid); h.unshift(c); localStorage.setItem(memKey(sid), JSON.stringify(h.slice(0,8))); }catch(e){}
+  if(API_BASE){
+    try{ await fetch(API_BASE+'/api/memory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({seller_id:sid, plan:c})}); }catch(e){}
+  }
+}
+async function updateMemNote(sid){
   const el = document.getElementById('memNote'); if(!el) return;
-  const prior = getPriorPlans(sid);
-  if(!prior.length){ el.innerHTML = ''; return; }
-  el.innerHTML = `<svg class="icon icon-sm" viewBox="0 0 24 24" style="vertical-align:-3px"><path d="M12 2a5 5 0 0 0-5 5v1a4 4 0 0 0-1 7 4 4 0 0 0 6 3 4 4 0 0 0 6-3 4 4 0 0 0-1-7V7a5 5 0 0 0-5-5Z"/></svg> AI remembers <b>${prior.length}</b> past plan${prior.length>1?'s':''} for this seller (last: ${esc(prior[0].date)}) — the next plan builds on them.`;
+  const prior = await memLoad(sid);
+  if(!prior || !prior.length){ el.innerHTML = ''; return; }
+  const shared = STATE.live && STATE._memShared;
+  el.innerHTML = `<svg class="icon icon-sm" viewBox="0 0 24 24" style="vertical-align:-3px"><path d="M12 2a5 5 0 0 0-5 5v1a4 4 0 0 0-1 7 4 4 0 0 0 6 3 4 4 0 0 0 6-3 4 4 0 0 0-1-7V7a5 5 0 0 0-5-5Z"/></svg> AI remembers <b>${prior.length}</b> past plan${prior.length>1?'s':''} for this seller (last: ${esc(prior[0].date)})${shared?' · team-shared':''} — the next plan builds on them.`;
 }
 
 /* ---------- source indicator ---------- */
@@ -556,6 +572,7 @@ async function checkHealthInner(attempt){
     const h = await (await fetch(API_BASE + '/api/health', {signal:ctrl.signal, cache:'no-store'})).json();
     clearTimeout(to);
     STATE.live = true;
+    STATE._memShared = !!h.memory;
     txt.textContent = 'Live · ' + (h.claude ? 'AI ready' : 'data only');
     dot.style.background = 'var(--ok)'; dot.style.boxShadow='0 0 0 3px rgba(52,211,153,.18)';
   }catch(e){
@@ -1178,8 +1195,9 @@ async function generatePlan(){
   }
   STATE.lastPlan = data;  // for export
   renderPlanCard(wrap, data);
-  savePlanToMemory((STATE.seller && STATE.seller.seller_id) || '', data);  // remember for next time
-  updateMemNote((STATE.seller && STATE.seller.seller_id) || '');
+  const _sid = (STATE.seller && STATE.seller.seller_id) || '';
+  await memSave(_sid, data);              // remember for next time (server-shared + local)
+  updateMemNote(_sid);
   updateFunds();  // refresh remaining AI budget after the multi-agent run
 }
 
@@ -1192,7 +1210,7 @@ async function runAgents(i, prog){
     return r.json();
   };
   const cats = planTabs().map(t=>t.key);
-  const prior = getPriorPlans((STATE.seller && STATE.seller.seller_id) || '');
+  const prior = await memLoad((STATE.seller && STATE.seller.seller_id) || '');
   // 1) analyst reads the raw data once (+ the AI's own past plans for this seller)
   prog(prior.length ? `Agent 1 · Analyst reviewing data + ${prior.length} past plan(s)…` : 'Agent 1 · Analyst reading your P&L + Meta data…');
   const {digest} = await post({stage:'analyst', seller:STATE.seller, mode:STATE.mode,

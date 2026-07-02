@@ -42,6 +42,11 @@ ANTHROPIC_BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "").rstrip("/")  # opt
 CLAUDE_MODEL       = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")  # or claude-opus-4-8
 # Per-stage model tiering (default = CLAUDE_MODEL). To cut cost/budget, set specialists to
 # a cheaper model, e.g. SPECIALIST_MODEL=claude-sonnet-4-6, keep SYNTH_MODEL=claude-opus-4-8.
+# Upstash Redis (team-shared AI memory) — free tier. Set both to enable server-side memory.
+UPSTASH_URL   = os.environ.get("UPSTASH_REDIS_REST_URL", "").rstrip("/")
+UPSTASH_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+MEM_KEEP = 8  # plans retained per seller
+
 ANALYST_MODEL      = os.environ.get("ANALYST_MODEL", CLAUDE_MODEL)
 SPECIALIST_MODEL   = os.environ.get("SPECIALIST_MODEL", CLAUDE_MODEL)
 SYNTH_MODEL        = os.environ.get("SYNTH_MODEL", CLAUDE_MODEL)
@@ -557,6 +562,7 @@ def health():
         "claude": bool(ANTHROPIC_API_KEY),
         "model": CLAUDE_MODEL,
         "claude_base_url": ANTHROPIC_BASE_URL or "api.anthropic.com (direct)",
+        "memory": bool(UPSTASH_URL and UPSTASH_TOKEN),
         "cache": cache,
     }
 
@@ -582,6 +588,61 @@ def funds():
                 "remaining": round(mb - sp, 2), "currency": "USD"}
     except Exception:
         return {"available": False}
+
+
+# ---- Team-shared AI memory (Upstash Redis REST) --------------------------------
+def _redis(cmd):
+    """Run one Redis command via Upstash REST. cmd = ['LPUSH','key','val']. Returns result or None."""
+    if not (UPSTASH_URL and UPSTASH_TOKEN):
+        return None
+    r = urllib.request.Request(UPSTASH_URL, data=json.dumps(cmd).encode(),
+                               method="POST", headers={"Authorization": "Bearer " + UPSTASH_TOKEN,
+                                                        "Content-Type": "application/json"})
+    with urllib.request.urlopen(r, timeout=10) as resp:
+        return json.loads(resp.read().decode()).get("result")
+
+
+class MemoryReq(BaseModel):
+    seller_id: str
+    plan: dict
+
+
+@app.get("/api/memory")
+def memory_get(seller_id: str = ""):
+    """Return the AI's past plans for a seller (team-shared, newest first)."""
+    if not (UPSTASH_URL and UPSTASH_TOKEN):
+        return {"available": False, "plans": []}
+    sid = seller_id.strip()
+    if not sid:
+        return {"available": True, "plans": []}
+    try:
+        items = _redis(["LRANGE", "plan:" + sid, "0", str(MEM_KEEP - 1)]) or []
+        plans = []
+        for it in items:
+            try:
+                plans.append(json.loads(it))
+            except Exception:
+                pass
+        return {"available": True, "plans": plans}
+    except Exception:
+        return {"available": False, "plans": []}
+
+
+@app.post("/api/memory")
+def memory_post(req: MemoryReq):
+    """Append a plan to a seller's shared history (keeps the most recent MEM_KEEP)."""
+    if not (UPSTASH_URL and UPSTASH_TOKEN):
+        return {"available": False}
+    sid = req.seller_id.strip()
+    if not sid:
+        raise HTTPException(400, "seller_id required")
+    try:
+        key = "plan:" + sid
+        _redis(["LPUSH", key, json.dumps(req.plan)])
+        _redis(["LTRIM", key, "0", str(MEM_KEEP - 1)])
+        return {"available": True, "ok": True}
+    except Exception as e:
+        return {"available": False, "error": str(e)[:120]}
 
 
 @app.post("/api/refresh")
