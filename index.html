@@ -1216,13 +1216,22 @@ async function runAgents(i, prog){
   const {digest} = await post({stage:'analyst', seller:STATE.seller, mode:STATE.mode,
     website:i.website||'', pnl_csv:i.pnl?i.pnl.content:'', meta_csv:i.meta?i.meta.content:'',
     extra_csv:(i.extra||[]).map(f=>({name:f.name,content:f.content})), prior_plans:prior});
-  // 2) specialists in parallel (one per category tab)
+  // 2) specialists in parallel (one per category tab); each retried ONCE as a separate
+  //    request if it errors or returns empty (keeps every request under the 60s timeout)
   prog(`Agents 2–${cats.length+1} · ${cats.length} specialists working in parallel…`);
-  const results = await Promise.all(cats.map(c =>
-    post({stage:'specialist', mode:STATE.mode, website:i.website||'', category:c, digest})
-      .then(r=>({c, actions:r.actions||[]}))
-      .catch(e=>({c, actions:[], err:e.message}))
-  ));
+  const runSpec = async (c)=>{
+    for(let attempt=0; attempt<2; attempt++){
+      try{
+        const r = await post({stage:'specialist', mode:STATE.mode, website:i.website||'', category:c, digest});
+        if(r.actions && r.actions.length) return {c, actions:r.actions};
+        if(attempt===1) return {c, actions:r.actions||[]};   // second empty → accept empty
+      }catch(e){
+        if(attempt===1) return {c, actions:[], err:e.message}; // second failure → report
+      }
+    }
+    return {c, actions:[]};
+  };
+  const results = await Promise.all(cats.map(runSpec));
   const drafts = {}; let firstErr=''; STATE.agentErrors = {};
   results.forEach(r=>{ drafts[r.c]=r.actions; if(r.err){ STATE.agentErrors[r.c]=r.err; if(!firstErr) firstErr=r.err; } });
   if(Object.values(drafts).every(a=>!a.length) && firstErr) throw new Error(firstErr);

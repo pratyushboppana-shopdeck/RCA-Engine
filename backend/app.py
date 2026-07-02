@@ -989,11 +989,10 @@ def plan(req: PlanReq):
             "'low' = nice-to-have. Return via the submit tool."
         )
         user = f"Seller track: {track}.\nWebsite: {website or '(n/a)'}\n\n=== ANALYST DIGEST ===\n{req.digest}"
-        out = _tool_call(client, sysp, user, ACTIONS_SCHEMA, max_tokens=1600, model=SPECIALIST_MODEL)
-        actions = out.get("actions", [])
-        if not actions:  # one retry — occasionally the model returns an empty tool call
-            actions = _tool_call(client, sysp, user, ACTIONS_SCHEMA, max_tokens=1600, model=SPECIALIST_MODEL).get("actions", [])
-        return {"category": cat, "actions": actions}
+        # single call only — retry (if empty) is done by the frontend as a SEPARATE request
+        # so one request never risks the serverless 60s timeout.
+        out = _tool_call(client, sysp, user, ACTIONS_SCHEMA, max_tokens=1500, model=SPECIALIST_MODEL)
+        return {"category": cat, "actions": out.get("actions", [])}
 
     # ---- STAGE 3: synthesizer — CORRELATE only (specialists own their categories) ----
     if req.stage == "synth":
