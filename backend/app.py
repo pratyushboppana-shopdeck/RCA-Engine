@@ -47,6 +47,7 @@ UPSTASH_URL   = os.environ.get("UPSTASH_REDIS_REST_URL", "").rstrip("/")
 UPSTASH_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 MEM_KEEP = 8  # plans retained per seller
 
+PLAN_MODEL         = os.environ.get("PLAN_MODEL", CLAUDE_MODEL)  # single-pass plan model (Opus default; set Sonnet for max speed)
 ANALYST_MODEL      = os.environ.get("ANALYST_MODEL", CLAUDE_MODEL)
 SPECIALIST_MODEL   = os.environ.get("SPECIALIST_MODEL", CLAUDE_MODEL)
 SYNTH_MODEL        = os.environ.get("SYNTH_MODEL", CLAUDE_MODEL)
@@ -800,6 +801,8 @@ PLAN_SCHEMA = {
         "scaleup":  {"type": "array", "items": {"$ref": "#/$defs/action"},
                      "description": "2K->5K scaling plan (1k-5k track only; empty for HITS)"},
         "summary":  {"type": "string", "description": "2-4 sentence executive correlation summary across all categories"},
+        "top_priorities": {"type": "array", "items": {"type": "string"},
+                           "description": "3-5 highest-impact actions across all categories, in order, each prefixed with its area"},
     },
     "required": ["website", "campaign", "outside"],
     "$defs": {
@@ -838,7 +841,7 @@ BEYOND 5K (HIT2 = 2 profitable weeks at 5K): retargeting layer at ~20% of budget
 ICP: High ICP (>=7) + High Spend = scale fast (best success ~37%); Low ICP + Low Spend = hold & validate (~20%). More unique products + one proven creative format + RTO in range + responsive seller/stock = the pattern of accounts that scaled."""
 
 
-CSV_CHAR_LIMIT = 60000  # cap each CSV sent to the model (keeps token use sane)
+CSV_CHAR_LIMIT = 35000  # cap each CSV sent to the model (keeps token use + latency sane)
 
 
 def _csv_block(title, text):
@@ -1097,6 +1100,12 @@ def plan(req: PlanReq):
         cats += "4. scaleup  — the 2K->5K scaling plan per the playbook (diagnosis -> matrix -> scale gates)\n"
     else:
         cats += "Return an empty 'scaleup' array (not applicable to the HITS track).\n"
+    cats += ("ALSO return: 'summary' (2-4 sentence executive correlation of the biggest cross-cutting "
+             "levers) and 'top_priorities' (3-5 highest-impact actions across ALL categories, in order, each "
+             "prefixed with its area, e.g. 'Campaign: cut the Open campaign at 2.2x').\n")
+    if req.prior_plans:
+        cats += ("This seller has PAST AI plans (below). In the summary note progress since last time; "
+                 "escalate repeated unresolved items rather than restating them.\n")
 
     user_prompt = (
         f"Seller track: {track}.\n"
@@ -1106,24 +1115,27 @@ def plan(req: PlanReq):
         + _csv_block("P&L (profit & loss)", req.pnl_csv)
         + _csv_block("Meta ad-account metrics", req.meta_csv)
         + "".join(_csv_block(f"Additional: {f.name}", f.content) for f in (req.extra_csv or []))
+        + ("\n" + _prior_block(req.prior_plans) if req.prior_plans else "")
         + "\nAnalyse the above deeply, then call submit_plan with the action plan across:\n"
         + cats
     )
     try:
         msg = client.messages.create(
-            model=CLAUDE_MODEL,
-            max_tokens=5200 if is_growth else 4000,
+            model=PLAN_MODEL,
+            max_tokens=4500 if is_growth else 3800,
             system=sys_prompt,
             tools=[{
                 "name": "submit_plan",
-                "description": "Submit the structured 3-category action plan.",
+                "description": "Submit the structured action plan (all categories + summary + top_priorities).",
                 "input_schema": PLAN_SCHEMA,
             }],
             tool_choice={"type": "tool", "name": "submit_plan"},
             messages=[{"role": "user", "content": user_prompt}],
         )
     except Exception as e:
-        raise HTTPException(502, f"Claude error: {e}")
+        msg_txt = str(e)
+        code = 429 if ("budget" in msg_txt.lower() or "429" in msg_txt) else 502
+        raise HTTPException(code, f"Claude error: {msg_txt}")
 
     for block in msg.content:
         if getattr(block, "type", None) == "tool_use" and block.name == "submit_plan":
