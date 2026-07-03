@@ -1152,6 +1152,27 @@ def plan(req: PlanReq):
             "20-30%/day), and the gates (stock, RTO, single-product risk).\n\n" + SCALEUP_PLAYBOOK
         )
 
+    # plain-English style + a concrete "new campaign" blueprint (applies to the single-pass plan)
+    sys_prompt += (
+        "\n\nWRITING STYLE — write for a busy operations manager, NOT an analyst:\n"
+        "- Action title: a short, direct instruction in plain words, max ~9 words (e.g. 'Turn off the engagement campaign').\n"
+        "- Description: 2-4 SHORT sentences in simple English. Say WHAT to do first, then a one-line WHY with the key number.\n"
+        "- Minimise jargon. The first time you use a term like ROAS, CPM, AOV, break-even, A+A, LAL, place a 3-6 word plain "
+        "meaning in brackets, e.g. 'ROAS (revenue per rupee spent)'. No dense analyst paragraphs.\n"
+        "- Always ground it in the seller's real ₹ numbers.\n"
+        "CAMPAIGN CATEGORY — besides the fixes, you MUST include ONE action titled like 'Build this new campaign' that is a "
+        "step-by-step BLUEPRINT for the campaign to create now. Put each item on its own line in the description:\n"
+        "  • Objective: (e.g. Sales / Purchase conversions)\n"
+        "  • Daily budget: total ₹ and how to split it\n"
+        "  • Ad sets: how many and how structured (e.g. 1 broad Advantage+ ad set)\n"
+        "  • Audience: exactly who (Advantage+ / broad / interest + age/gender/region) and why\n"
+        "  • Placements: which ones to keep on (and which to turn off)\n"
+        "  • Creatives: how many and which formats (image/video/UGC/catalogue)\n"
+        "  • Campaign name: a clear name to use\n"
+        "  • Scale rule: when to raise budget and by how much\n"
+        "Make the blueprint copy-paste ready so they can build it without guessing.\n"
+    )
+
     cats = (
         "1. website  — landing page / storefront / pixel / catalogue / CRO fixes\n"
         "2. campaign — Meta ad structure, creative, audience, budget, bidding actions\n"
