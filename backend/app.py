@@ -55,16 +55,17 @@ SYNTH_MODEL        = os.environ.get("SYNTH_MODEL", CLAUDE_MODEL)
 MAPPING_CARD  = 7753
 BUSINESS_CARD = 10353
 BUSINESS_BACKUP_CARD = 10352   # lighter Category Intelligence card — website/company/contact backup
-CATEGORY_CARD = 3773    # "seller level category mapping - L2" (db6, seller-level, bulk-cacheable).
-                        # Replaces 10362, which is broken upstream (references deleted cross-db card 3757).
+CATEGORY_CARD = 3757    # "product level category mapping" (db6, per-seller) — clean l1>l2>l3>l4 chain.
+CATEGORY_PARAM = "f9e4715e-fc82-466e-b6eb-ac9462c8cfaf"
+                        # 3773 was WRONG (independently-ranked l1/l2/l3 -> incoherent hierarchy).
 METRICS_CARD  = 10773   # daily spend/CPM/CTR/s_gmv time series (all HIT sellers, no params)
 WEEKLY_PNL_CARD = 11011 # week-1/2/3 spend + P&L per seller (no params)
 LAST_TS_CARD    = 10189 # last troubleshoot details + actions per seller (optional seller filter)
 PNL_CARD = 1880         # full weekly P&L (db2, cheap) — auto-fills the P&L upload
 PNL_SELLER_PARAM = "dc33c41d-bd5b-2eab-2dd9-07f2a8e9d6f8"
 PNL_WEEKS = 26          # keep the most recent N weeks for the P&L CSV
-# Bulk-cached cards (pulled param-less = all sellers in one scan).
-CARDS = (MAPPING_CARD, BUSINESS_CARD, BUSINESS_BACKUP_CARD, CATEGORY_CARD,
+# Bulk-cached cards (pulled param-less = all sellers in one scan). Category is per-seller (not here).
+CARDS = (MAPPING_CARD, BUSINESS_CARD, BUSINESS_BACKUP_CARD,
          METRICS_CARD, WEEKLY_PNL_CARD, LAST_TS_CARD)
 METRICS_KEEP_DAYS = 45  # trim each seller's series to the last N rows in the cache
 
@@ -267,6 +268,37 @@ _category_cache = {}
 _category_lock = threading.Lock()
 
 
+_category_cache = {}
+_category_lock = threading.Lock()
+
+
+def _get_category(seller_id):
+    """Coherent category chain (l1>l2>l3) = the seller's MOST COMMON product category from card 3757.
+    Per-seller (db6), cached 24h. Returns {} on failure/quota."""
+    with _category_lock:
+        c = _category_cache.get(seller_id)
+        if c and time.time() - c["ts"] < 24 * 3600:
+            return c["data"]
+    params = [{"type": "string/=", "value": str(seller_id), "id": CATEGORY_PARAM,
+               "target": ["variable", ["template-tag", "seller_id"]]}]
+    try:
+        rows = _mb(f"/api/card/{CATEGORY_CARD}/query/json", "POST", {"parameters": params})
+    except Exception:
+        return {}
+    from collections import Counter
+    chains = Counter()
+    for r in rows if isinstance(rows, list) else []:
+        if isinstance(r, dict) and _clean(r.get("l2")):
+            chains[(_clean(r.get("l1")), _clean(r.get("l2")), _clean(r.get("l3")))] += 1
+    data = {}
+    if chains:
+        (l1, l2, l3), _n = chains.most_common(1)[0]
+        data = {"l1": l1, "l2": l2, "l3": l3}
+    with _category_lock:
+        _category_cache[seller_id] = {"data": data, "ts": time.time()}
+    return data
+
+
 def _get_pnl_csv(seller_id):
     """P&L CSV auto-extracted from card 1880 (db2) for a seller — recent weeks, as CSV text."""
     params = [{"type": "string/=", "value": str(seller_id), "id": PNL_SELLER_PARAM,
@@ -289,24 +321,6 @@ def _get_pnl_csv(seller_id):
     for r in rows:
         w.writerow({k: r.get(k) for k in cols})
     return buf.getvalue(), len(rows)
-
-
-def _get_category(seller_id):
-    """Category L1/L2/L3 (card 10362, db23) — requires seller_id, so per-seller + cached."""
-    with _category_lock:
-        c = _category_cache.get(seller_id)
-        if c and time.time() - c["ts"] < 12 * 3600:
-            return c["data"]
-    params = [{"type": "string/=", "value": str(seller_id), "id": CATEGORY_SELLER_PARAM,
-               "target": ["variable", ["template-tag", "seller_id"]]}]
-    try:
-        rows = _mb(f"/api/card/{CATEGORY_CARD}/query/json", "POST", {"parameters": params})
-    except Exception:
-        return {}
-    data = rows[0] if isinstance(rows, list) and rows else {}
-    with _category_lock:
-        _category_cache[seller_id] = {"data": data, "ts": time.time()}
-    return data
 
 
 def _get_rto(seller_id, start, end):
@@ -731,7 +745,7 @@ def seller(req: SellerReq):
         return None
     pq = {"lifetime": _clean(_latest("lifetime_avg_pq")), "last_15d": _clean(_latest("last_15d_avg_pd"))}
 
-    cat = lookup(CATEGORY_CARD)   # seller-level category (card 3773), from bulk cache
+    cat = _get_category(sid)   # coherent l1>l2>l3 chain (card 3757, per-seller, cached)
     try:
         pnl_csv, pnl_weeks = _get_pnl_csv(sid)   # auto P&L from card 1880 (db2, cheap)
     except Exception:
@@ -786,10 +800,10 @@ def seller(req: SellerReq):
                               (BUSINESS_BACKUP_CARD if _clean(b2.get("website")) else None)),
     }
 
-    # category levels (card 3773): L1=primary_category_l1, L2=primary_l2, L3=tertiary_l3
-    l1 = _clean(cat.get("primary_category_l1"))
-    l2 = _clean(cat.get("primary_l2"))
-    l3 = _clean(cat.get("tertiary_l3"))
+    # category levels (card 3757): coherent chain L1 > L2 > L3 from the dominant product category
+    l1 = _clean(cat.get("l1"))
+    l2 = _clean(cat.get("l2"))
+    l3 = _clean(cat.get("l3"))
     category = {"l1": l1, "l2": l2, "l3": l3}
     # hard-coded benchmark keyed on primary_l2 (the CSV benchmark key)
     benchmark = BENCHMARKS.get(l2) if l2 else None
