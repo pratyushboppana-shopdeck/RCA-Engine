@@ -2,17 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<script>
-/* Canonical app is the Vercel deployment (frontend + API on ONE origin — no cross-origin
-   blocking by browser privacy settings / proxies). Any other host (e.g. GitHub Pages)
-   redirects there. Skips localhost dev and the vercel app itself (no loop). */
-(function(){
-  var h = location.hostname;
-  if (h.indexOf('vercel.app') === -1 && h.indexOf('localhost') === -1 && h !== '127.0.0.1'){
-    location.replace('https://troubleshoot-tool-sooty.vercel.app/' + location.search + location.hash);
-  }
-})();
-</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Meta Account Troubleshoot</title>
 <meta name="description" content="Live diagnostics + AI next-plan-of-action for seller accounts." />
@@ -555,7 +544,9 @@
    CONFIG — resolves the backend base URL, with graceful sample fallback.
    Priority:  ?api=...   >   localStorage.API_BASE   >   none (sample mode)
    ========================================================================= */
-const DEFAULT_API = 'https://troubleshoot-tool-sooty.vercel.app';  // live backend (Vercel)
+// Frontend + API are served from ONE origin (Vercel), so the backend defaults to same-origin.
+// Override with ?api=https://host (or empty ?api= for sample mode); remembered in localStorage.
+const DEFAULT_API = location.origin;  // same-origin backend (this deployment)
 const API_BASE = (() => {
   const q = new URLSearchParams(location.search).get('api');
   if (q !== null) { try { localStorage.setItem('API_BASE', q); } catch(e){} return q.replace(/\/$/, ''); }
