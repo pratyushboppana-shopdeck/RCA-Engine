@@ -1722,7 +1722,9 @@ def overview(req: OverviewReq):
     )
     user = f"Seller track: {track}.\n\n" + _overview_data_block(req, esc)
     client = _anthropic()
-    out = _tool_call(client, sysp, user, OVERVIEW_SCHEMA, max_tokens=3200, tool="submit", model=OVERVIEW_MODEL)
+    # generous output budget: the overview has many sections (12 stats + funnel + timeline +
+    # 5-angle story + issues); too low a cap truncates the trailing fields (e.g. key_issues).
+    out = _tool_call(client, sysp, user, OVERVIEW_SCHEMA, max_tokens=6000, tool="submit", model=OVERVIEW_MODEL)
     # defensive caps so a runaway never reaches the UI
     for k in ("spend_orders", "funnel", "what_happened", "key_issues"):
         if isinstance(out.get(k), list):
