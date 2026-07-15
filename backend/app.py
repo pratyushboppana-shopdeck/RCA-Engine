@@ -614,16 +614,19 @@ def _escalations_block(esc):
              f"{esc['counts'].get('sos',0)} SOS/escalations)"]
     if esc.get("sos"):
         lines.append("\nSOS / LEADERSHIP ESCALATIONS (most recent first):")
-        for s in esc["sos"][:12]:
-            lines.append(f"- [{s.get('at')}] ({s.get('channel')}) {str(s.get('comment') or '')[:400]}")
+        for s in esc["sos"][:8]:
+            lines.append(f"- [{s.get('at')}] ({s.get('channel')}) {str(s.get('comment') or '')[:300]}")
     if esc.get("calls"):
         lines.append("\nCALL SUMMARIES (side = who was on the call):")
-        for c in esc["calls"][:12]:
-            lines.append(f"- [{c.get('at')}] ({c.get('side')}) {str(c.get('summary') or '')[:400]}")
+        for c in esc["calls"][:8]:
+            lines.append(f"- [{c.get('at')}] ({c.get('side')}) {str(c.get('summary') or '')[:300]}")
     if esc.get("chats"):
-        lines.append("\nCHAT TIMELINE (who: seller / gc / kam / poc / bot / system):")
-        for m in esc["chats"][:90]:
-            lines.append(f"- [{m.get('at')}] {m.get('who')}: {str(m.get('text') or '')[:220]}")
+        # drop pure bot/system noise from the prompt; keep the human (seller/gc/kam/poc) exchange
+        human = [m for m in esc["chats"] if (m.get("who") in ("seller", "gc", "kam", "poc"))]
+        shown = (human or esc["chats"])[:45]
+        lines.append("\nCHAT TIMELINE (who: seller / gc / kam / poc):")
+        for m in shown:
+            lines.append(f"- [{m.get('at')}] {m.get('who')}: {str(m.get('text') or '')[:180]}")
     return "\n".join(lines) + "\n"
 
 
@@ -1718,13 +1721,16 @@ def overview(req: OverviewReq):
         "paused campaigns', 'start at Rs500/day'), and escalations (SOS/leadership escalations and WHY they were "
         "raised). If there is no signal for an angle, return an empty string for it. Quote the seller's own words "
         "briefly where it captures the issue.\n"
-        "5) KEY ISSUES ('key_issues'): the main problems, most important first, each grounded in a number or event."
+        "5) KEY ISSUES ('key_issues'): the main problems, most important first, each grounded in a number or event.\n\n"
+        "KEEP IT TIGHT (this must finish well within a time budget): at most 7 spend_orders, 6 funnel stages, "
+        "7 what_happened bullets, and 5 key_issues; one or two short sentences per read/story field. Prioritise "
+        "the most important items rather than being exhaustive."
     )
     user = f"Seller track: {track}.\n\n" + _overview_data_block(req, esc)
     client = _anthropic()
-    # generous output budget: the overview has many sections (12 stats + funnel + timeline +
-    # 5-angle story + issues); too low a cap truncates the trailing fields (e.g. key_issues).
-    out = _tool_call(client, sysp, user, OVERVIEW_SCHEMA, max_tokens=6000, tool="submit", model=OVERVIEW_MODEL)
+    # Output is bounded by the "KEEP IT TIGHT" caps in the prompt so all sections (incl. the
+    # trailing key_issues) fit and the single call stays well under Vercel's 120s limit.
+    out = _tool_call(client, sysp, user, OVERVIEW_SCHEMA, max_tokens=4500, tool="submit", model=OVERVIEW_MODEL)
     # defensive caps so a runaway never reaches the UI
     for k in ("spend_orders", "funnel", "what_happened", "key_issues"):
         if isinstance(out.get(k), list):
