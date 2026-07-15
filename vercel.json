@@ -3,6 +3,6 @@
     { "source": "/api/(.*)", "destination": "/api/index" }
   ],
   "functions": {
-    "api/index.py": { "maxDuration": 120 }
+    "api/index.py": { "maxDuration": 120, "includeFiles": "backend/data/**" }
   }
 }
