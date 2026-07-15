@@ -36,6 +36,9 @@ from pydantic import BaseModel
 MB_URL   = os.environ.get("METABASE_URL", "https://metabase.kaip.in").rstrip("/")
 MB_USER  = os.environ.get("METABASE_USER_EMAIL", "")
 MB_PASS  = os.environ.get("METABASE_PASSWORD", "")
+# Preferred: a Metabase API key (Admin -> Settings -> API keys). Sent as the `x-api-key` header,
+# no session/login needed. Falls back to email+password session auth if the key is not set.
+MB_API_KEY = os.environ.get("METABASE_API_KEY", "")
 
 ANTHROPIC_API_KEY  = os.environ.get("ANTHROPIC_API_KEY", "")
 ANTHROPIC_BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "").rstrip("/")  # optional proxy (e.g. LiteLLM)
@@ -107,6 +110,15 @@ RTO_LP   = {"dash": 187, "dashcard": 1440, "card": 855,  "seller": "4991551a", "
 BUSINESS_SELLER_PARAM_ID = "a45e1c84-6dc1-42fc-93da-79f43ee84255"  # card 10353
 CATEGORY_SELLER_PARAM_ID = "232ba3d0-4861-4ebd-8775-5f8b9d488737"  # card 10362
 
+# Card 9293 "call, chat, sos dump" (db6, native) — seller communications: call summaries,
+# chat events (seller/gc/kam/poc/bot/system) and SOS/leadership escalations. The card itself has
+# NO seller param (it scans paused HIT sellers), so we run a seller-scoped rewrite of its SQL via
+# /api/dataset. Feeds the Account Overview / RCA multi-angle story.
+ESCALATION_DB = 6
+ESCALATION_CARD = 9293   # source of the SQL (kept for reference / lineage)
+ESCALATION_WINDOW_DAYS = int(os.environ.get("ESCALATION_WINDOW_DAYS", "30"))
+ESCALATION_TTL = 3600    # per-seller cache (s)
+
 # --- caching / quota control ---
 # Each card's seller_id filter is OPTIONAL, so we pull ALL sellers in ONE scan and
 # cache by seller_id. Every lookup is then free; we only scan once per refresh.
@@ -147,18 +159,40 @@ def _auth(force=False):
         return tok
 
 
-def _mb(path, method="GET", body=None):
-    """Call Metabase, re-authenticating once on 401/403."""
-    tok = _auth()
-    headers = {"Content-Type": "application/json", "X-Metabase-Session": tok}
+def _mb_headers(force_reauth=False):
+    """Auth headers: API key (x-api-key) if configured, else a login session token."""
+    h = {"Content-Type": "application/json"}
+    if MB_API_KEY:
+        h["x-api-key"] = MB_API_KEY
+    else:
+        h["X-Metabase-Session"] = _auth(force=force_reauth)
+    return h
+
+
+def _mb(path, method="GET", body=None, timeout=60):
+    """Call Metabase. With a session token, re-authenticate once on 401/403 (API keys don't expire)."""
+    headers = _mb_headers()
     try:
-        return _req(f"{MB_URL}{path}", method, body, headers)
+        return _req(f"{MB_URL}{path}", method, body, headers, timeout=timeout)
     except urllib.error.HTTPError as ex:
-        if ex.code in (401, 403):
-            tok = _auth(force=True)
-            headers["X-Metabase-Session"] = tok
-            return _req(f"{MB_URL}{path}", method, body, headers)
+        if ex.code in (401, 403) and not MB_API_KEY:
+            headers = _mb_headers(force_reauth=True)
+            return _req(f"{MB_URL}{path}", method, body, headers, timeout=timeout)
         raise HTTPException(502, f"Metabase error {ex.code}: {ex.read().decode()[:200]}")
+
+
+def _mb_sql(database_id, sql, timeout=120):
+    """Run a native SQL query via /api/dataset and return rows as a list of dicts (col name -> value).
+    Used for card 9293's call/chat/sos data, which has no per-seller param — we run a seller-scoped
+    rewrite of its SQL. Requires the Metabase account to have native-query permission on the database."""
+    res = _mb("/api/dataset", "POST",
+              {"database": database_id, "type": "native", "native": {"query": sql}}, timeout=timeout)
+    data = res.get("data", {}) if isinstance(res, dict) else {}
+    if isinstance(data.get("rows"), list):
+        cols = [c.get("name") for c in data.get("cols", [])]
+        return [dict(zip(cols, r)) for r in data["rows"]]
+    # a dataset error comes back as {"error": ...} / {"status":"failed"} rather than raising
+    raise HTTPException(502, f"Metabase dataset query failed: {str(res)[:200]}")
 
 
 # ----------------------------------------------------------------------------
@@ -441,6 +475,158 @@ def _get_demand(seller_id):
     return data
 
 
+import re
+
+_escalation_cache = {}
+_escalation_lock = threading.Lock()
+
+
+def _strip_html(s):
+    """Chat content carries HTML (<b>, <br>) and <@Name|id> mentions -> plain readable text."""
+    if not isinstance(s, str):
+        return s
+    s = re.sub(r"<@(?:[A-Za-z ]+:\s*)?([^|>]+)\|[^>]+>", r"@\1", s)   # <@GC: Name|id> / <@Name|id> -> @Name
+    s = re.sub(r"<br\s*/?>", "\n", s, flags=re.I)
+    s = re.sub(r"<[^>]+>", "", s)                                     # drop remaining tags
+    s = (s.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+          .replace("&quot;", '"').replace("&#39;", "'").replace("&nbsp;", " "))
+    return re.sub(r"[ \t]+", " ", s).strip()
+
+
+def _escalation_sql(seller_id, days):
+    """Seller-scoped rewrite of card 9293's SQL: calls + chats + SOS for ONE seller over `days`.
+    seller_id is validated alphanumeric by the caller (safe to inline). Partition filters on every
+    fact table's own created_at are required by BigQuery for these tables."""
+    return f"""
+DECLARE target_seller STRING DEFAULT '{seller_id}';
+DECLARE win_days INT64 DEFAULT {int(days)};
+
+WITH
+calls_wb AS (
+  SELECT ecd.created_at, u1.role AS caller_role, ecd.summary, TO_JSON_STRING(ecd.seller_summary) AS actionables
+  FROM `blitzscale-prod-project.nushop.exotel_calls` ec
+  INNER JOIN `blitzscale-prod-project.nushop.exotel_call_details` ecd ON ec.exotel_call_sid = ecd.sid
+  JOIN `nushop.workboard_tasks` wt ON wt.id = ec.entity_id
+  LEFT JOIN nushop.userprofiles up1 ON ABS(SAFE_CAST(up1.contact_number AS FLOAT64)) = SAFE_CAST(ecd.call_from AS FLOAT64)
+  LEFT JOIN nushop.users u1 ON u1._id = up1.user_id
+  WHERE DATE(ec.created_at,'Asia/Kolkata')  >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL win_days DAY)
+    AND DATE(ecd.created_at,'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL win_days DAY)
+    AND DATE(wt.created_at,'Asia/Kolkata')  >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL 90 DAY)
+    AND wt.seller_id = target_seller
+),
+calls_convo AS (
+  SELECT ecd.created_at, u1.role AS caller_role, ecd.summary, TO_JSON_STRING(ecd.seller_summary) AS actionables
+  FROM `blitzscale-prod-project.nushop.exotel_calls` ec
+  JOIN `blitzscale-prod-project.nushop.exotel_call_details` ecd ON ec.exotel_call_sid = ecd.sid
+  JOIN `seller_app_chat.conversations` c ON c.id = ec.entity_id
+  LEFT JOIN nushop.userprofiles up1 ON ABS(SAFE_CAST(up1.contact_number AS FLOAT64)) = SAFE_CAST(ecd.call_from AS FLOAT64)
+  LEFT JOIN nushop.users u1 ON u1._id = up1.user_id
+  WHERE DATE(ec.created_at,'Asia/Kolkata')  >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL win_days DAY)
+    AND DATE(ecd.created_at,'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL win_days DAY)
+    AND c.created_at < CURRENT_TIMESTAMP()
+    AND c.user_id = target_seller
+),
+all_calls AS (
+  SELECT DATETIME(created_at,'Asia/Kolkata') AS ev_at, caller_role, summary, actionables
+  FROM (SELECT * FROM calls_wb UNION ALL SELECT * FROM calls_convo)
+),
+chats AS (
+  SELECT DATETIME(ce.created_at,'Asia/Kolkata') AS ev_at, ce.sender_type AS who, ce.content
+  FROM `blitzscale-prod-project.seller_app_chat.chat_events` ce
+  JOIN `blitzscale-prod-project.seller_app_chat.conversations` c ON ce.conversation_id = c.id
+  WHERE DATE(ce.created_at,'Asia/Kolkata') >= DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL win_days DAY)
+    AND c.created_at < CURRENT_TIMESTAMP()
+    AND c.user_id = target_seller
+),
+sos AS (
+  SELECT DATETIME(created_at,'Asia/Kolkata') AS ev_at, request_channel, comment
+  FROM `blitzscale-prod-project.nushop.seller_app_requests`
+  WHERE request_type IN ('sos','leadership_escalation')
+    AND created_at >= TIMESTAMP(DATE_SUB(CURRENT_DATE('Asia/Kolkata'), INTERVAL win_days DAY))
+    AND seller_id = target_seller
+)
+SELECT 'call' AS source, CAST(ev_at AS STRING) AS ev_at, caller_role AS who, summary AS text, actionables AS extra FROM all_calls
+UNION ALL
+SELECT 'chat', CAST(ev_at AS STRING), who, content, CAST(NULL AS STRING) FROM chats
+UNION ALL
+SELECT 'sos', CAST(ev_at AS STRING), request_channel, comment, CAST(NULL AS STRING) FROM sos
+ORDER BY ev_at DESC
+"""
+
+
+ESC_CALLS_KEEP, ESC_CHATS_KEEP, ESC_SOS_KEEP = 30, 160, 30
+
+
+def _get_escalations(seller_id, days=None):
+    """Per-seller calls / chats / SOS from card 9293's query (db6, native). Best-effort + cached.
+    Returns {} on any failure (e.g. no native-query permission) so the overview degrades gracefully."""
+    days = days or ESCALATION_WINDOW_DAYS
+    sid = str(seller_id or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9]+", sid):   # ids are mongo-style hex; reject anything else (SQL-inject guard)
+        return {}
+    ck = (sid, days)
+    with _escalation_lock:
+        c = _escalation_cache.get(ck)
+        if c and time.time() - c["ts"] < ESCALATION_TTL:
+            return c["data"]
+    try:
+        rows = _mb_sql(ESCALATION_DB, _escalation_sql(sid, days))
+    except Exception:
+        return {}
+    calls, chats, sos = [], [], []
+    counts = {"seller": 0, "gc": 0, "kam": 0, "poc": 0, "bot": 0, "system": 0}
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict):
+            continue
+        src, when = r.get("source"), _clean(r.get("ev_at"))
+        if src == "call":
+            role = (r.get("who") or "").lower()
+            side = "KAM" if "key-account" in role else ("GC" if "growth" in role else _clean(r.get("who")))
+            calls.append({"at": when, "side": side, "summary": _strip_html(_clean(r.get("text")))})
+        elif src == "chat":
+            who = (_clean(r.get("who")) or "").lower()
+            txt = _strip_html(_clean(r.get("text")))
+            if not txt:
+                continue
+            if who in counts:
+                counts[who] += 1
+            chats.append({"at": when, "who": who, "text": txt})
+        elif src == "sos":
+            sos.append({"at": when, "channel": _clean(r.get("who")), "comment": _strip_html(_clean(r.get("text")))})
+    data = {
+        "window_days": days,
+        "counts": {"calls": len(calls), "chats": len(chats), "sos": len(sos), **counts},
+        "calls": calls[:ESC_CALLS_KEEP],
+        "chats": chats[:ESC_CHATS_KEEP],
+        "sos": sos[:ESC_SOS_KEEP],
+    }
+    with _escalation_lock:
+        _escalation_cache[ck] = {"data": data, "ts": time.time()}
+    return data
+
+
+def _escalations_block(esc):
+    """Compact, role-tagged text digest of the seller's calls/chats/SOS for the overview prompt."""
+    if not esc or not (esc.get("calls") or esc.get("chats") or esc.get("sos")):
+        return "### Seller communications (calls / chats / escalations)\n(none found in the recent window)\n"
+    lines = [f"### Seller communications — last {esc.get('window_days')}d "
+             f"({esc['counts'].get('calls',0)} calls, {esc['counts'].get('chats',0)} chat msgs, "
+             f"{esc['counts'].get('sos',0)} SOS/escalations)"]
+    if esc.get("sos"):
+        lines.append("\nSOS / LEADERSHIP ESCALATIONS (most recent first):")
+        for s in esc["sos"][:12]:
+            lines.append(f"- [{s.get('at')}] ({s.get('channel')}) {str(s.get('comment') or '')[:400]}")
+    if esc.get("calls"):
+        lines.append("\nCALL SUMMARIES (side = who was on the call):")
+        for c in esc["calls"][:12]:
+            lines.append(f"- [{c.get('at')}] ({c.get('side')}) {str(c.get('summary') or '')[:400]}")
+    if esc.get("chats"):
+        lines.append("\nCHAT TIMELINE (who: seller / gc / kam / poc / bot / system):")
+        for m in esc["chats"][:90]:
+            lines.append(f"- [{m.get('at')}] {m.get('who')}: {str(m.get('text') or '')[:220]}")
+    return "\n".join(lines) + "\n"
+
+
 def _refresh_card(card_id):
     """Force a live full pull for one card, update memory + disk. Raises on failure."""
     by_id = _pull_card_all(card_id)
@@ -618,6 +804,15 @@ class PlanReq(BaseModel):
     prior_plans: list = []     # AI's own past plans for this seller (memory), most recent first
 
 
+class OverviewReq(BaseModel):
+    seller: dict = {}
+    mode: str = "hits"
+    pnl_csv: str = ""               # P&L export (CSV text) — required
+    meta_csv: str = ""              # Meta ad-account metrics export (CSV text) — required
+    extra_csv: list[CsvFile] = []   # optional additional CSVs
+    window_days: int = 0            # escalation lookback (0 -> ESCALATION_WINDOW_DAYS)
+
+
 _INDEX_PATHS = [
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "index.html"),
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html"),
@@ -640,7 +835,7 @@ def health():
     cache = {str(cid): len((_bulk.get(cid) or {}).get("by_id", {})) for cid in CARDS}
     return {
         "ok": True,
-        "metabase": bool(MB_USER and MB_PASS),
+        "metabase": bool(MB_API_KEY or (MB_USER and MB_PASS)),
         "claude": bool(ANTHROPIC_API_KEY),
         "model": CLAUDE_MODEL,
         "claude_base_url": ANTHROPIC_BASE_URL or "api.anthropic.com (direct)",
@@ -1418,6 +1613,124 @@ def plan(req: PlanReq):
                 out["top_priorities"] = out["top_priorities"][:6]
             return out
     raise HTTPException(502, "Claude did not return a structured plan")
+
+
+# ----------------------------------------------------------------------------
+# Account Overview / RCA Engine — what actually happened in the account
+# (spend, orders, cancellations, funnel-stage diagnosis) + a multi-angle account
+# story (GC / KAM / Seller / requests / escalations) built from card 9293.
+# ----------------------------------------------------------------------------
+OVERVIEW_MODEL = os.environ.get("OVERVIEW_MODEL", CLAUDE_MODEL)  # descriptive RCA; Opus by default
+
+OVERVIEW_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "headline": {"type": "string",
+                     "description": "2-3 sentence plain-English summary of what happened in this account and the money outcome"},
+        "spend_orders": {"type": "array", "items": {"$ref": "#/$defs/stat"},
+                         "description": "the money & orders facts: total spend, where it went, orders placed, orders "
+                                        "cancelled, delivered/RTO, GMV/revenue, ROAS, AOV — each as label+value(+note)"},
+        "funnel": {"type": "array", "items": {"$ref": "#/$defs/stage"},
+                   "description": "funnel TOP to BOTTOM: Reach (CPM) -> Clicks (CTR) -> Cost per click (CPC) -> "
+                                  "Landing/Add-to-cart -> Purchase (conversion/CPP) -> Delivery (RTO/cancellation). "
+                                  "One entry per stage that the data supports, in order."},
+        "what_happened": {"type": "array", "items": {"type": "string"},
+                          "description": "chronological bullet points of the key events in the account (money + comms)"},
+        "account_story": {"$ref": "#/$defs/story"},
+        "key_issues": {"type": "array", "items": {"type": "string"},
+                       "description": "the main problems, most important first, each grounded in a number or event"},
+    },
+    "required": ["headline", "spend_orders", "funnel", "key_issues"],
+    "$defs": {
+        "stat": {"type": "object", "properties": {
+            "label": {"type": "string"}, "value": {"type": "string"},
+            "note": {"type": "string", "description": "short context, e.g. 'good' / 'above 5% threshold'"}},
+            "required": ["label", "value"]},
+        "stage": {"type": "object", "properties": {
+            "stage": {"type": "string", "description": "stage name, e.g. 'Reach (CPM)'"},
+            "metric": {"type": "string", "description": "the numbers for this stage, e.g. 'CPM ₹182 · 1.2M impressions'"},
+            "verdict": {"type": "string", "enum": ["good", "ok", "bad"]},
+            "read": {"type": "string", "description": "1-2 sentence plain read of what this stage tells us "
+                                                      "(e.g. 'CPM is fine so ads ARE being shown, but CTR is low — "
+                                                      "people see them and don't click, so the creative/hook is the problem')"}},
+            "required": ["stage", "verdict", "read"]},
+        "story": {"type": "object",
+                  "description": "what was going on from each angle, built from the calls/chats/escalations. "
+                                 "Leave a field as an empty string if there is no signal for it.",
+                  "properties": {
+                      "gc_side": {"type": "string", "description": "what the Growth Consultant did / said / committed"},
+                      "kam_side": {"type": "string", "description": "what the Key Account Manager did / said"},
+                      "seller_side": {"type": "string", "description": "the seller's mood, complaints and what they asked for"},
+                      "seller_requests": {"type": "string", "description": "concrete requests the seller made"},
+                      "escalations": {"type": "string", "description": "SOS / leadership escalations raised and why"}}},
+    },
+}
+
+
+def _overview_data_block(req, esc):
+    seller = req.seller or {}
+    return (
+        f"Seller account context (JSON — includes mapping[gc/gm/kam], business[cancellation_pct], daily_metrics "
+        f"[date/spend/cpm/ctr/orders/gmv/s_gmv], weekly_pnl, spend, category, benchmark, demand_products):\n"
+        f"{json.dumps(seller, indent=2)}\n\n"
+        "=== UPLOADED DATA ===\n"
+        + _csv_block("P&L (profit & loss)", req.pnl_csv)
+        + _csv_block("Meta ad-account metrics", req.meta_csv)
+        + "".join(_csv_block(f"Additional: {f.name}", f.content) for f in (req.extra_csv or []))
+        + "\n" + _escalations_block(esc)
+    )
+
+
+@app.post("/api/overview")
+def overview(req: OverviewReq):
+    """Account Overview / RCA — describe what happened in the account (money, orders, funnel) and tell the
+    multi-angle story (GC / KAM / seller / requests / escalations). One Claude call, structured output."""
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+    if not (req.pnl_csv or "").strip() or not (req.meta_csv or "").strip():
+        raise HTTPException(400, "Both a P&L CSV and a Meta ad-account metrics CSV are required")
+    sid = str((req.seller or {}).get("seller_id") or "").strip()
+    days = req.window_days or ESCALATION_WINDOW_DAYS
+    esc = _safe_call(_get_escalations, sid, days, default={}) if sid else {}
+
+    track = "HITS-managed account" if req.mode == "hits" else "seller in the 1k-5k weekly-spend band"
+    sysp = (
+        "You are a performance-marketing analyst for an Indian D2C marketplace's growth team. Produce an "
+        "ACCOUNT OVERVIEW / ROOT-CAUSE story of what has ACTUALLY HAPPENED in this seller's account so far — "
+        "this is descriptive/diagnostic, NOT a recommendations plan. Work ONLY from the data provided; never "
+        "invent numbers. Write for a busy operations manager in simple English; the first time you use a term "
+        "like CPM/CTR/CPC/ROAS/RTO/AOV, add a 3-6 word plain meaning in brackets.\n\n"
+        "1) MONEY & ORDERS ('spend_orders'): from the P&L CSV + Meta CSV + daily_metrics, state total spend and "
+        "WHERE it went (top campaigns/products), orders placed, orders cancelled (P&L cancelled_perc / "
+        "business.cancellation_pct), delivered vs RTO (returns), GMV/revenue, COGS & contribution margin, blended "
+        "ROAS (revenue per rupee) and AOV. Reconcile the P&L revenue/spend with the Meta spend. Real ₹ numbers.\n"
+        "2) FUNNEL ('funnel'), TOP to BOTTOM, one entry per stage the data supports, IN ORDER: Reach (CPM/"
+        "impressions) -> Clicks (CTR) -> Cost per click (CPC) -> Landing/Add-to-cart -> Purchase (conversion/CPP) "
+        "-> Delivery (RTO/cancellation). For each: the numbers, a verdict (good/ok/bad), and a plain read that "
+        "PINPOINTS where it breaks — e.g. 'CPM is healthy so ads ARE reaching people, but CTR is low, so people "
+        "see the ads and don't click -> the creative/hook is the problem', or 'clicks are fine but purchases are "
+        "low -> the website/price/offer is the drop-off'. Diagnose the specific stage the account is losing at.\n"
+        "3) WHAT HAPPENED ('what_happened'): a short chronological bullet list tying money movements to events "
+        "(budget changes, pauses, spikes/drops) and to the communications below.\n"
+        "4) ACCOUNT STORY ('account_story'): from the calls / chats / SOS below, summarise what was going on from "
+        "EACH angle — gc_side (what the Growth Consultant did/committed), kam_side (Key Account Manager), "
+        "seller_side (the seller's mood, complaints, frustration), seller_requests (concrete asks, e.g. 'revive "
+        "paused campaigns', 'start at Rs500/day'), and escalations (SOS/leadership escalations and WHY they were "
+        "raised). If there is no signal for an angle, return an empty string for it. Quote the seller's own words "
+        "briefly where it captures the issue.\n"
+        "5) KEY ISSUES ('key_issues'): the main problems, most important first, each grounded in a number or event."
+    )
+    user = f"Seller track: {track}.\n\n" + _overview_data_block(req, esc)
+    client = _anthropic()
+    out = _tool_call(client, sysp, user, OVERVIEW_SCHEMA, max_tokens=3200, tool="submit", model=OVERVIEW_MODEL)
+    # defensive caps so a runaway never reaches the UI
+    for k in ("spend_orders", "funnel", "what_happened", "key_issues"):
+        if isinstance(out.get(k), list):
+            out[k] = out[k][:12]
+    out["escalations_meta"] = {"window_days": days,
+                               "counts": (esc or {}).get("counts", {}),
+                               "available": bool(esc)}
+    return out
 
 
 if __name__ == "__main__":

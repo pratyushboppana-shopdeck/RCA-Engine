@@ -311,6 +311,57 @@
   .ps-prio ol{margin:0;padding-left:20px}
   .ps-prio li{font-size:13.5px;line-height:1.55;color:var(--txt-2);margin-bottom:4px}
 
+  /* ---------- dual CTA ---------- */
+  .cta-row{display:flex;justify-content:center;gap:12px;margin-top:24px;flex-wrap:wrap}
+  .btn.alt{background:linear-gradient(135deg,var(--ok),#10b981);box-shadow:0 12px 26px -12px rgba(52,211,153,.7)}
+  .cta-col{display:flex;flex-direction:column;align-items:center;gap:6px}
+  .cta-sub{font-size:11.5px;color:var(--txt-3);text-align:center}
+
+  /* ---------- account overview / RCA ---------- */
+  .ov-headline{background:linear-gradient(180deg,rgba(52,211,153,.12),transparent);border:1px solid rgba(52,211,153,.3);border-radius:var(--r);padding:14px 16px;margin-bottom:16px;font-size:14.5px;line-height:1.6;color:var(--txt)}
+  .ov-sec-h{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--txt-3);font-weight:700;margin:20px 0 12px;display:flex;align-items:center;gap:8px}
+  .ov-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+  @media(max-width:720px){.ov-stats{grid-template-columns:repeat(2,1fr)}}
+  .ov-stat{padding:14px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg)}
+  .ov-stat .k{font-size:11.5px;color:var(--txt-3);font-weight:500}
+  .ov-stat .v{font-size:20px;font-weight:700;margin-top:6px;letter-spacing:-.02em}
+  .ov-stat .n{font-size:11px;color:var(--txt-2);margin-top:4px}
+  /* funnel */
+  .funnel{display:flex;flex-direction:column;gap:0}
+  .fstage{display:flex;gap:14px;padding:14px 2px;border-bottom:1px dashed var(--line);position:relative}
+  .fstage:last-child{border-bottom:none}
+  .f-rail{display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:20px}
+  .f-dot{width:14px;height:14px;border-radius:50%;flex-shrink:0;margin-top:3px;border:3px solid var(--bg)}
+  .f-line{width:2px;flex:1;background:var(--line);margin-top:2px}
+  .fstage:last-child .f-line{display:none}
+  .f-body{flex:1;min-width:0}
+  .f-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .f-name{font-size:14.5px;font-weight:700}
+  .f-metric{font-size:12px;color:var(--txt-2);font-variant-numeric:tabular-nums}
+  .f-read{font-size:13px;color:var(--txt-2);margin-top:5px;line-height:1.55}
+  .f-verdict{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:2px 9px;border-radius:999px}
+  .v-good{background:rgba(52,211,153,.14);color:var(--ok);border:1px solid rgba(52,211,153,.35)}
+  .v-ok{background:rgba(251,191,36,.14);color:var(--warn);border:1px solid rgba(251,191,36,.35)}
+  .v-bad{background:rgba(251,113,133,.14);color:var(--bad);border:1px solid rgba(251,113,133,.35)}
+  .dot-good{background:var(--ok)} .dot-ok{background:var(--warn)} .dot-bad{background:var(--bad)}
+  /* what happened timeline */
+  .ov-timeline{margin:0;padding-left:20px}
+  .ov-timeline li{font-size:13.5px;line-height:1.6;color:var(--txt-2);margin-bottom:6px}
+  /* account story (multi-angle) */
+  .story-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  @media(max-width:640px){.story-grid{grid-template-columns:1fr}}
+  .story{padding:14px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg)}
+  .story.esc{border-color:rgba(251,113,133,.35);background:rgba(251,113,133,.05)}
+  .story-h{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;margin-bottom:8px}
+  .story-h .tag{font-size:10px;font-weight:700;padding:2px 8px;border-radius:999px;background:var(--surface-3);color:var(--txt-2)}
+  .story-h.gc{color:#a5b4fc} .story-h.kam{color:#6ee7b7} .story-h.seller{color:#fbbf24}
+  .story-h.req{color:#93c5fd} .story-h.esc{color:var(--bad)}
+  .story p{font-size:13px;line-height:1.6;color:var(--txt-2)}
+  .ov-issues{margin:0;padding-left:20px}
+  .ov-issues li{font-size:13.5px;line-height:1.6;color:var(--txt);margin-bottom:6px}
+  .ov-countbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+  .ov-count{font-size:11.5px;color:var(--txt-2);background:var(--surface-2);border:1px solid var(--line);padding:4px 11px;border-radius:999px}
+
   /* ---------- plan head + export ---------- */
   .plan-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;flex-wrap:wrap}
   .btn-export{display:inline-flex;align-items:center;gap:7px;font:inherit;font-size:13px;font-weight:600;cursor:pointer;color:var(--txt);background:var(--surface-2);border:1px solid var(--line-strong);padding:9px 15px;border-radius:10px;transition:var(--fast)}
@@ -1067,15 +1118,25 @@ function renderSeller(d){
 
   ${inputsCard(d)}
 
-  <div class="plancta">
-    <button class="btn btn-lg" id="planBtn" onclick="generatePlan()" disabled>
-      <svg class="icon" viewBox="0 0 24 24"><path d="M5 3v4M3 5h4M6 17v4M4 19h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5L13 3Z"/></svg>
-      Give next plan of action
-    </button>
+  <div class="cta-row">
+    <div class="cta-col">
+      <button class="btn btn-lg alt" id="overviewBtn" onclick="generateOverview()" disabled>
+        <svg class="icon" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+        Account overview / RCA
+      </button>
+      <div class="cta-sub" id="overviewHint">Needs the Meta ad metrics CSV</div>
+    </div>
+    <div class="cta-col">
+      <button class="btn btn-lg" id="planBtn" onclick="generatePlan()" disabled>
+        <svg class="icon" viewBox="0 0 24 24"><path d="M5 3v4M3 5h4M6 17v4M4 19h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5L13 3Z"/></svg>
+        Give next plan of action
+      </button>
+      <div class="cta-sub" id="gateHint"></div>
+    </div>
   </div>
-  <div class="gate-hint" id="gateHint"></div>
   <div class="mem-note" id="memNote"></div>
 
+  <div id="overview"></div>
   <div id="plan"></div>`;
   document.getElementById('results').innerHTML = html;
   // reset & wire the analysis inputs (website prefilled from card 10353/10352)
@@ -1222,6 +1283,20 @@ function updateGate(){
       hint.innerHTML = `<svg class="icon icon-sm" viewBox="0 0 24 24" style="vertical-align:-3px"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg> Add ${miss.join(', ')} to unlock`;
     }
   }
+  // Account overview / RCA gates on the P&L + Meta CSVs
+  const ovBtn = document.getElementById('overviewBtn');
+  const ovHint = document.getElementById('overviewHint');
+  const ovOk = !!(i.meta && i.pnl);
+  if(ovBtn) ovBtn.disabled = !ovOk;
+  if(ovHint){
+    if(ovOk){ ovHint.textContent = 'Ready — pulls calls, chats & escalations too'; }
+    else {
+      const miss=[];
+      if(!i.pnl) miss.push('P&L CSV');
+      if(!i.meta) miss.push('Meta ad metrics CSV');
+      ovHint.textContent = 'Add ' + miss.join(' + ') + ' to unlock';
+    }
+  }
 }
 
 /* ---------- plan ---------- */
@@ -1263,6 +1338,144 @@ async function generatePlan(){
   await memSave(_sid, data);              // remember for next time (server-shared + local)
   updateMemNote(_sid);
   updateFunds();  // refresh remaining AI budget after the run
+}
+
+/* ---------- Account Overview / RCA ---------- */
+async function generateOverview(){
+  const i = STATE.inputs || {};
+  if(!(i.meta && i.pnl)){ updateGate(); return; }
+  const wrap = document.getElementById('overview');
+  const prog = (msg)=>{ wrap.innerHTML = `<div class="card reveal"><div class="empty"><span class="spin" style="display:inline-block;vertical-align:middle"></span> &nbsp;${esc(msg)}</div></div>`; };
+  wrap.scrollIntoView({behavior:'smooth',block:'nearest'});
+  let data;
+  try{
+    if(!API_BASE){ prog('Building account overview…'); data = await mockOverview(STATE.seller, STATE.mode, i); }
+    else {
+      prog('Claude is reconstructing what happened in the account (spend, funnel, calls & escalations)…');
+      const r = await fetch(API_BASE+'/api/overview',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({ seller:STATE.seller, mode:STATE.mode,
+          pnl_csv:i.pnl?i.pnl.content:'', meta_csv:i.meta?i.meta.content:'',
+          extra_csv:(i.extra||[]).map(f=>({name:f.name,content:f.content})) })});
+      if(!r.ok){ const e = await r.json().catch(()=>({})); throw new Error(e.detail||('API '+r.status)); }
+      data = await r.json();
+    }
+  }catch(e){
+    wrap.innerHTML = `<div class="card"><div class="empty">Couldn't build the overview<br/>${esc(e.message)}</div></div>`;
+    return;
+  }
+  STATE.lastOverview = data;
+  renderOverviewCard(wrap, data);
+  updateFunds();
+}
+
+function ovStat(s){
+  return `<div class="ov-stat"><div class="k">${esc(s.label)}</div><div class="v tnum">${esc(s.value)}</div>${s.note?`<div class="n">${esc(s.note)}</div>`:''}</div>`;
+}
+function funnelStage(f){
+  const v = (f.verdict||'ok').toLowerCase(); const vc = v==='good'?'good':(v==='bad'?'bad':'ok');
+  const vlabel = {good:'Working',ok:'Watch',bad:'Broken'}[vc];
+  return `<div class="fstage">
+    <div class="f-rail"><div class="f-dot dot-${vc}"></div><div class="f-line"></div></div>
+    <div class="f-body">
+      <div class="f-top">
+        <span class="f-name">${esc(f.stage)}</span>
+        ${f.metric?`<span class="f-metric">${esc(f.metric)}</span>`:''}
+        <span class="f-verdict v-${vc}">${vlabel}</span>
+      </div>
+      <div class="f-read">${esc(f.read)}</div>
+    </div>
+  </div>`;
+}
+function storyCard(cls, tag, label, text){
+  if(!text || !String(text).trim()) return '';
+  return `<div class="story ${cls==='esc'?'esc':''}">
+    <div class="story-h ${cls}"><span class="tag">${esc(tag)}</span> ${esc(label)}</div>
+    <p>${esc(text)}</p>
+  </div>`;
+}
+function renderOverviewCard(wrap, data){
+  const em = data.escalations_meta || {}; const c = em.counts || {};
+  const countbar = (em.available)
+    ? `<div class="ov-countbar">
+         <span class="ov-count">🗓 last ${esc(em.window_days||30)}d</span>
+         <span class="ov-count">📞 ${c.calls||0} calls</span>
+         <span class="ov-count">💬 ${c.chats||0} chat msgs</span>
+         <span class="ov-count">🚨 ${c.sos||0} escalations</span>
+       </div>` : '';
+  const stats = (data.spend_orders||[]).map(ovStat).join('');
+  const funnel = (data.funnel||[]).map(funnelStage).join('');
+  const timeline = (data.what_happened||[]).length
+    ? `<div class="ov-sec-h"><svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg> What happened</div>
+       <ol class="ov-timeline">${data.what_happened.map(x=>`<li>${esc(x)}</li>`).join('')}</ol>` : '';
+  const st = data.account_story || {};
+  const storyCards = [
+    storyCard('seller','Seller','the seller side', st.seller_side),
+    storyCard('req','Requests','what the seller asked for', st.seller_requests),
+    storyCard('gc','GC','growth consultant side', st.gc_side),
+    storyCard('kam','KAM','key account manager side', st.kam_side),
+    storyCard('esc','Escalation','SOS / leadership escalations', st.escalations),
+  ].filter(Boolean).join('');
+  const story = storyCards
+    ? `<div class="ov-sec-h"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/></svg> Account story — every angle</div>
+       <div class="story-grid">${storyCards}</div>` : '';
+  const issues = (data.key_issues||[]).length
+    ? `<div class="ov-sec-h"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg> Key issues</div>
+       <ol class="ov-issues">${data.key_issues.map(x=>`<li>${esc(x)}</li>`).join('')}</ol>` : '';
+  wrap.innerHTML = `
+  <div class="card reveal">
+    <div class="plan-head">
+      <div class="label" style="margin:0"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg> Account overview / RCA</div>
+      <button class="btn-export" onclick="exportOverview()">
+        <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+        Export (.txt)
+      </button>
+    </div>
+    ${countbar}
+    ${data.headline?`<div class="ov-headline">${esc(data.headline)}</div>`:''}
+    ${stats?`<div class="ov-sec-h"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h14v4"/><path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-3"/><path d="M16 13h5v-3h-5a1.5 1.5 0 0 0 0 3Z"/></svg> Where the money went &amp; what came back</div><div class="ov-stats">${stats}</div>`:''}
+    ${funnel?`<div class="ov-sec-h"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M3 4h18M6 4v4l4 4v7l4-2v-5l4-4V4"/></svg> Funnel — where it breaks</div><div class="funnel">${funnel}</div>`:''}
+    ${timeline}
+    ${story}
+    ${issues}
+    <div class="source-note">
+      <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+      ${API_BASE?('Generated live by Claude'+(em.available?' · calls/chats/escalations from card 9293':' · escalation data unavailable, funnel from CSV')):'Sample overview — connect backend for live AI'}
+    </div>
+  </div>`;
+}
+
+function exportOverview(){
+  const d = STATE.seller || {}, ov = STATE.lastOverview;
+  if(!ov) return;
+  const line = '='.repeat(64); const L = [];
+  L.push('ACCOUNT OVERVIEW / RCA'); L.push(line);
+  L.push('Company     : ' + (d.company || '-'));
+  L.push('Seller ID   : ' + (d.seller_id || '-'));
+  L.push('Track       : ' + (STATE.mode==='hits'?'HITS Troubleshoot':'1k-5k Troubleshoot'));
+  L.push('Generated   : ' + new Date().toLocaleString());
+  L.push('');
+  if(ov.headline){ L.push('SUMMARY'); L.push(line);
+    (ov.headline.match(/.{1,88}(\s|$)/g)||[ov.headline]).forEach(w=>L.push(w.trim())); L.push(''); }
+  if((ov.spend_orders||[]).length){ L.push(line); L.push('MONEY & ORDERS'); L.push(line);
+    ov.spend_orders.forEach(s=>L.push('  '+(s.label||'')+' : '+(s.value||'')+(s.note?('  ('+s.note+')'):''))); L.push(''); }
+  if((ov.funnel||[]).length){ L.push(line); L.push('FUNNEL — WHERE IT BREAKS'); L.push(line);
+    ov.funnel.forEach(f=>{ L.push('  ['+String(f.verdict||'ok').toUpperCase()+'] '+(f.stage||'')+(f.metric?('  — '+f.metric):''));
+      if(f.read){ (f.read.match(/.{1,84}(\s|$)/g)||[f.read]).forEach(w=>L.push('       '+w.trim())); } L.push(''); }); }
+  if((ov.what_happened||[]).length){ L.push(line); L.push('WHAT HAPPENED'); L.push(line);
+    ov.what_happened.forEach((x,ix)=>L.push('  '+(ix+1)+'. '+x)); L.push(''); }
+  const st = ov.account_story||{};
+  const angles = [['Seller',st.seller_side],['Seller requests',st.seller_requests],['GC side',st.gc_side],['KAM side',st.kam_side],['Escalations',st.escalations]].filter(a=>a[1]&&String(a[1]).trim());
+  if(angles.length){ L.push(line); L.push('ACCOUNT STORY — EVERY ANGLE'); L.push(line);
+    angles.forEach(a=>{ L.push('  '+a[0].toUpperCase()+':'); (a[1].match(/.{1,84}(\s|$)/g)||[a[1]]).forEach(w=>L.push('     '+w.trim())); L.push(''); }); }
+  if((ov.key_issues||[]).length){ L.push(line); L.push('KEY ISSUES'); L.push(line);
+    ov.key_issues.forEach((x,ix)=>L.push('  '+(ix+1)+'. '+x)); L.push(''); }
+  L.push(line); L.push('Meta Account Troubleshoot');
+  const blob = new Blob([L.join('\n')], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob); const a = document.createElement('a');
+  const safe = (d.company || d.seller_id || 'seller').toString().replace(/[^a-z0-9]+/gi,'_').slice(0,40);
+  a.href = url; a.download = 'account_overview_' + safe + '.txt';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
 }
 
 /* Multi-agent orchestration: analyst -> 4 specialists (parallel) -> synthesizer.
@@ -1447,6 +1660,8 @@ function mockSeller(id, mode, start, end){
     rto:{cities:[{city:'Hyderabad',total:75,delivered:38,rto:50},{city:'Jaipur',total:40,delivered:25,rto:38},{city:'Mumbai',total:120,delivered:96,rto:20}],couriers:[{courier:'Maruti Surface',delivered:0,rto:100},{courier:'DTDC Surface',delivered:12,rto:50},{courier:'Delhivery',delivered:210,rto:22}]},
     weekly_pnl:{best_source:'new_pnl', w1_spend:r(15000,30000), w2_spend:r(15000,32000), w3_spend:r(18000,38000), w1_pnl:+(r(20,60)/10).toFixed(1), w2_pnl:+(r(-10,30)/10).toFixed(1), w3_pnl:+(r(-60,10)/10).toFixed(1)},
     last_ts:{total_ts_done:r(2,10), last_ts_date:(end||metrics[metrics.length-1].date), ts_type:'manual_ts', last_7d_meta_spend:r(3000,9000), last_ts_actions:'Educate seller to not do a lot of Cancellation. |DETAILS| Seller Cancellation (8.82%) between last week is above the threshold of 5%. Reduce cancellations to protect delivery and ROAS.'},
+    pnl_weeks:4,
+    pnl_csv:'year_week,marketing_spend,gmv,cogs,aov,cancelled_perc,net_pnl_perc\n2026-W25,'+r(15000,30000)+','+r(60000,120000)+',39,1048,'+(r(20,120)/10).toFixed(1)+','+(r(-40,40)/10).toFixed(1)+'\n2026-W26,'+r(15000,32000)+','+r(60000,130000)+',39,1048,'+(r(20,120)/10).toFixed(1)+','+(r(-40,40)/10).toFixed(1)+'\n2026-W27,'+r(18000,38000)+','+r(70000,140000)+',39,1048,'+(r(20,120)/10).toFixed(1)+','+(r(-60,30)/10).toFixed(1)+'\n2026-W28,'+r(18000,40000)+','+r(70000,150000)+',39,1048,'+(r(20,120)/10).toFixed(1)+','+(r(-60,20)/10).toFixed(1),
     demand_products:[
       {product:'Embroidered Anarkali Kurti', product_id:'WE-ANRK-01', link:'https://sellerstore.com/p/anarkali-01', mp_link:'https://amazon.in/dp/B0ANRK', orders_30d:r(40,120), contribution_pct:r(8,18), our_price:1099, our_cost:480, mp_rating_count:r(140,900), mp_rating_site:'amazon', demand_price_min:899, demand_price_max:1499, demand_price_avg:1180, pq_score:4.3, is_unique:false},
       {product:'Cotton Straight Pant', product_id:'WE-PANT-04', link:'https://sellerstore.com/p/pant-04', mp_link:'https://flipkart.com/p/pant', orders_30d:r(20,60), contribution_pct:r(4,9), our_price:699, our_cost:300, mp_rating_count:r(20,60), mp_rating_site:'flipkart', demand_price_min:599, demand_price_max:899, demand_price_avg:740, pq_score:4.0, is_unique:false},
@@ -1481,6 +1696,52 @@ function mockPlan(seller, mode, inputs){
   ] : [];
   return new Promise(res=>setTimeout(()=>res({website,campaign,outside,scaleup}),600));
 }
+
+function mockOverview(seller, mode, inputs){
+  const b=seller.business||{}, m=seller.mapping||{};
+  const dm = seller.daily_metrics||[]; const last = dm[dm.length-1]||{};
+  const spend = dm.reduce((a,r)=>a+(+r.spend||0),0);
+  const orders = dm.reduce((a,r)=>a+(+r.orders||0),0);
+  const gmv = dm.reduce((a,r)=>a+(+r.gmv||0),0);
+  const canc = b.cancellation_pct;
+  const roas = spend? (gmv/spend) : 0;
+  return new Promise(res=>setTimeout(()=>res({
+    headline: `Over the last ${dm.length||14} days the account spent about ₹${Math.round(spend).toLocaleString('en-IN')} and drove ~${orders} orders (₹${Math.round(gmv).toLocaleString('en-IN')} GMV, ~${roas.toFixed(1)}x blended ROAS). Ads are reaching people fine, but click-through slipped mid-window and cancellations are ${canc>5?'high':'in range'} — the leak is between the ad and the order, not the reach.`,
+    spend_orders: [
+      {label:'Total spend', value:'₹'+Math.round(spend).toLocaleString('en-IN'), note:`${dm.length||14} days`},
+      {label:'Orders placed', value:String(orders), note:'from daily metrics'},
+      {label:'Cancellation', value:(canc==null?'—':canc+'%'), note:canc>5?'above 5% threshold ⚠':'within norm'},
+      {label:'GMV', value:'₹'+Math.round(gmv).toLocaleString('en-IN'), note:'~'+roas.toFixed(1)+'x ROAS (revenue per ₹)'},
+    ],
+    funnel: [
+      {stage:'Reach (CPM)', metric:'CPM ₹'+(last.cpm||220)+' · impressions healthy', verdict:'good', read:'CPM (cost per 1,000 views) is normal, so Meta IS showing the ads to enough people. Reach is not the problem.'},
+      {stage:'Clicks (CTR)', metric:'CTR '+(last.ctr||0.9)+'%', verdict:(last.ctr||0.9)<1.2?'bad':'ok', read:'CTR (share who click) is low — people see the ads but do not click. This points to the creative/hook, not the budget.'},
+      {stage:'Landing → Add-to-cart', metric:'site conversion', verdict:'ok', read:'Of those who click, a reasonable share add to cart. The storefront is converting acceptably.'},
+      {stage:'Purchase (CPP)', metric:orders+' orders', verdict:'ok', read:'Orders are coming through but volume is capped by the weak click stage upstream.'},
+      {stage:'Delivery (RTO / cancellation)', metric:(canc==null?'—':canc+'% cancelled'), verdict:canc>5?'bad':'good', read:canc>5?'Cancellations are above 5%, which inflates cost per delivered order and bleeds P&L.':'Cancellations are within the healthy band.'},
+    ],
+    what_happened: [
+      'Spend ran steady early in the window, then daily budget was raised mid-window.',
+      'Around the same time CTR dipped and CPM ticked up — efficiency worsened as spend rose.',
+      canc>5?`Cancellations sat at ${canc}%, above the 5% target, dragging delivered-order economics.`:'Cancellations stayed within the healthy range.',
+      'Seller reached out about paused campaigns and asked to restart at a lower daily budget.',
+    ],
+    account_story: {
+      seller_side: `${b.company||'The seller'} was frustrated that campaigns were paused and money seemed stuck; wanted ads live again urgently and questioned callback responsiveness.`,
+      seller_requests: 'Revive all paused campaigns; start marketing at ₹500/day instead of the standard ₹1000; confirm the official calling number.',
+      gc_side: `GC ${m.gc||'(assigned)'} acknowledged the paused-campaign issue and committed to reviving them, but flagged that ₹500/day would exhaust too fast to judge performance.`,
+      kam_side: `KAM ${m.kam||'(assigned)'} was looped in on callbacks; some scheduled calls did not connect (RNR/voicemail).`,
+      escalations: canc>5?'A leadership escalation was raised over unresponsive callbacks and a request to reassign the account.':'No leadership escalation in the window; concerns handled at GC/KAM level.',
+    },
+    key_issues: [
+      'Low CTR is the primary leak — creative/hook needs refresh before spending more.',
+      canc>5?`Cancellation at ${canc}% (above 5%) is eroding delivered-order profit.`:'Watch efficiency: CPM rose as budget increased.',
+      'Trust/communication gap: paused campaigns + missed callbacks drove a seller escalation.',
+    ],
+    escalations_meta: { window_days:30, available:true, counts:{calls:6, chats:altSeed(seller), sos:canc>5?3:0} },
+  }),700));
+}
+function altSeed(s){ return 20 + (((s&&s.seller_id)||'x').length*7)%40; }
 </script>
 </body>
 </html>
