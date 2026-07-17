@@ -119,6 +119,14 @@ ESCALATION_CARD = 9293   # source of the SQL (kept for reference / lineage)
 ESCALATION_WINDOW_DAYS = int(os.environ.get("ESCALATION_WINDOW_DAYS", "30"))
 ESCALATION_TTL = 3600    # per-seller cache (s)
 
+# Card 11834 "All seller All Troubleshoot Actions" (db6, per-seller) — the STRATEGY lens: every
+# troubleshoot workflow run on the account with the actions/solutions given. Lets the RCA tell what
+# problem was identified, what was done, and (vs later data) whether it helped. Has a seller_id param.
+TROUBLESHOOT_CARD = 11834
+TROUBLESHOOT_PARAM = "3db15dfe-70c1-4765-906a-cb62fb43cf55"
+TROUBLESHOOT_KEEP = 12   # most recent workflows to keep
+TROUBLESHOOT_TTL = 6 * 3600
+
 # --- caching / quota control ---
 # Each card's seller_id filter is OPTIONAL, so we pull ALL sellers in ONE scan and
 # cache by seller_id. Every lookup is then free; we only scan once per refresh.
@@ -627,6 +635,56 @@ def _escalations_block(esc):
         lines.append("\nCHAT TIMELINE (who: seller / gc / kam / poc):")
         for m in shown:
             lines.append(f"- [{m.get('at')}] {m.get('who')}: {str(m.get('text') or '')[:180]}")
+    return "\n".join(lines) + "\n"
+
+
+_ts_cache = {}
+_ts_lock = threading.Lock()
+
+
+def _get_troubleshoots(seller_id):
+    """Per-seller troubleshoot history from card 11834 (db6, has a seller_id param). Each row is one TS
+    workflow with its rolled-up actions/solutions. Best-effort + cached. Returns [] on failure."""
+    sid = str(seller_id or "").strip()
+    if not sid:
+        return []
+    with _ts_lock:
+        c = _ts_cache.get(sid)
+        if c and time.time() - c["ts"] < TROUBLESHOOT_TTL:
+            return c["data"]
+    params = [{"type": "string/=", "value": sid, "id": TROUBLESHOOT_PARAM,
+               "target": ["variable", ["template-tag", "seller_id"]]}]
+    try:
+        rows = _mb(f"/api/card/{TROUBLESHOOT_CARD}/query/json", "POST", {"parameters": params})
+    except Exception:
+        return []
+    out = []
+    for r in rows if isinstance(rows, list) else []:
+        if not isinstance(r, dict):
+            continue
+        acts = (_clean(r.get("ts_actions")) or "").replace("|DETAILS|", " — ")
+        acts = re.sub(r"\s+", " ", acts).strip()
+        out.append({
+            "date": _clean(r.get("ts_date")),
+            "type": _clean(r.get("ts_type")),
+            "count": r.get("action_count"),
+            "actions": acts[:900],
+        })
+    out.sort(key=lambda t: str(t.get("date") or ""), reverse=True)   # newest first
+    data = out[:TROUBLESHOOT_KEEP]
+    with _ts_lock:
+        _ts_cache[sid] = {"data": data, "ts": time.time()}
+    return data
+
+
+def _troubleshoots_block(ts):
+    """Compact text digest of the seller's past troubleshoot workflows for the overview prompt."""
+    if not ts:
+        return "### Past troubleshoots (strategy lens — card 11834)\n(none found)\n"
+    lines = [f"### Past troubleshoots — {len(ts)} workflow(s), most recent first (card 11834). "
+             "Each line is one TS: the date, type, and the actions/solutions the growth team gave."]
+    for t in ts:
+        lines.append(f"- [{t.get('date')}] ({t.get('type')}, {t.get('count')} actions): {t.get('actions')}")
     return "\n".join(lines) + "\n"
 
 
@@ -1640,6 +1698,10 @@ OVERVIEW_SCHEMA = {
         "what_happened": {"type": "array", "items": {"type": "string"},
                           "description": "chronological bullet points of the key events in the account (money + comms)"},
         "account_story": {"$ref": "#/$defs/story"},
+        "troubleshoot_lens": {"type": "array", "items": {"$ref": "#/$defs/ts_item"},
+                              "description": "per PAST troubleshoot workflow (most recent first): the problem it "
+                                             "identified, the solution/action given, and whether later data shows it "
+                                             "helped. Empty array if no troubleshoot history is provided."},
         "key_issues": {"type": "array", "items": {"type": "string"},
                        "description": "the main problems, most important first, each grounded in a number or event"},
     },
@@ -1666,11 +1728,21 @@ OVERVIEW_SCHEMA = {
                       "seller_side": {"type": "string", "description": "the seller's mood, complaints and what they asked for"},
                       "seller_requests": {"type": "string", "description": "concrete requests the seller made"},
                       "escalations": {"type": "string", "description": "SOS / leadership escalations raised and why"}}},
+        "ts_item": {"type": "object", "properties": {
+            "date": {"type": "string", "description": "the troubleshoot date"},
+            "ts_type": {"type": "string", "description": "auto_ts or manual_ts"},
+            "problem": {"type": "string", "description": "the problem this troubleshoot identified (infer from the actions)"},
+            "solution": {"type": "string", "description": "the key action(s)/solution given, in plain words"},
+            "outcome": {"type": "string", "enum": ["helped", "partial", "did_not_help", "not_implemented", "unclear"],
+                        "description": "whether LATER data (P&L trend, cancellation, funnel, repeat of the same action "
+                                       "in a later TS) shows it worked"},
+            "note": {"type": "string", "description": "1 sentence of evidence for the outcome, grounded in a number/trend"}},
+            "required": ["date", "problem", "solution", "outcome"]},
     },
 }
 
 
-def _overview_data_block(req, esc):
+def _overview_data_block(req, esc, ts):
     seller = req.seller or {}
     return (
         f"Seller account context (JSON — includes mapping[gc/gm/kam], business[cancellation_pct], daily_metrics "
@@ -1681,6 +1753,7 @@ def _overview_data_block(req, esc):
         + _csv_block("Meta ad-account metrics", req.meta_csv)
         + "".join(_csv_block(f"Additional: {f.name}", f.content) for f in (req.extra_csv or []))
         + "\n" + _escalations_block(esc)
+        + "\n" + _troubleshoots_block(ts)
     )
 
 
@@ -1695,6 +1768,7 @@ def overview(req: OverviewReq):
     sid = str((req.seller or {}).get("seller_id") or "").strip()
     days = req.window_days or ESCALATION_WINDOW_DAYS
     esc = _safe_call(_get_escalations, sid, days, default={}) if sid else {}
+    tsh = _safe_call(_get_troubleshoots, sid, default=[]) if sid else []
 
     track = "HITS-managed account" if req.mode == "hits" else "seller in the 1k-5k weekly-spend band"
     sysp = (
@@ -1720,24 +1794,32 @@ def overview(req: OverviewReq):
         "seller_side (the seller's mood, complaints, frustration), seller_requests (concrete asks, e.g. 'revive "
         "paused campaigns', 'start at Rs500/day'), and escalations (SOS/leadership escalations and WHY they were "
         "raised). If there is no signal for an angle, return an empty string for it. Quote the seller's own words "
-        "briefly where it captures the issue.\n"
-        "5) KEY ISSUES ('key_issues'): the main problems, most important first, each grounded in a number or event.\n\n"
+        "briefly where it captures the issue. ALSO fold in the PAST TROUBLESHOOTS below — e.g. if a TS told the "
+        "seller to fix cancellation weeks ago and it is still high, say so in seller_side/escalations.\n"
+        "5) TROUBLESHOOT LENS ('troubleshoot_lens'): for each PAST troubleshoot workflow provided (most recent "
+        "first), give the problem it identified, the solution/action it gave (plain words), and the OUTCOME — did "
+        "later data show it worked? Judge outcome from evidence: if the SAME action recurs across successive "
+        "troubleshoots (e.g. 'reduce cancellation' flagged repeatedly with the % not falling) it 'did_not_help' or "
+        "was 'not_implemented'; if the metric improved after, 'helped'; if you cannot tell, 'unclear'. Cite the "
+        "number/trend in 'note'. This is how we show what WE did and whether it landed.\n"
+        "6) KEY ISSUES ('key_issues'): the main problems, most important first, each grounded in a number or event.\n\n"
         "KEEP IT TIGHT (this must finish well within a time budget): at most 7 spend_orders, 6 funnel stages, "
-        "7 what_happened bullets, and 5 key_issues; one or two short sentences per read/story field. Prioritise "
-        "the most important items rather than being exhaustive."
+        "7 what_happened bullets, 8 troubleshoot_lens items, and 5 key_issues; one or two short sentences per "
+        "read/story/note field. Prioritise the most important items rather than being exhaustive."
     )
-    user = f"Seller track: {track}.\n\n" + _overview_data_block(req, esc)
+    user = f"Seller track: {track}.\n\n" + _overview_data_block(req, esc, tsh)
     client = _anthropic()
-    # Output is bounded by the "KEEP IT TIGHT" caps in the prompt so all sections (incl. the
-    # trailing key_issues) fit and the single call stays well under Vercel's 120s limit.
-    out = _tool_call(client, sysp, user, OVERVIEW_SCHEMA, max_tokens=4500, tool="submit", model=OVERVIEW_MODEL)
+    # Output is bounded by the "KEEP IT TIGHT" caps in the prompt so all sections fit and the single
+    # call stays well under Vercel's 120s limit.
+    out = _tool_call(client, sysp, user, OVERVIEW_SCHEMA, max_tokens=6000, tool="submit", model=OVERVIEW_MODEL)
     # defensive caps so a runaway never reaches the UI
-    for k in ("spend_orders", "funnel", "what_happened", "key_issues"):
+    for k in ("spend_orders", "funnel", "what_happened", "troubleshoot_lens", "key_issues"):
         if isinstance(out.get(k), list):
             out[k] = out[k][:12]
     out["escalations_meta"] = {"window_days": days,
                                "counts": (esc or {}).get("counts", {}),
                                "available": bool(esc)}
+    out["troubleshoot_meta"] = {"count": len(tsh), "available": bool(tsh)}
     return out
 
 

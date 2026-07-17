@@ -348,6 +348,23 @@
   .story p{font-size:13px;line-height:1.6;color:var(--txt-2)}
   .ov-issues{margin:0;padding-left:20px}
   .ov-issues li{font-size:13.5px;line-height:1.6;color:var(--txt);margin-bottom:6px}
+  /* troubleshoot lens */
+  .tslens{display:flex;flex-direction:column}
+  .tsitem{display:flex;gap:14px;padding:14px 2px;border-bottom:1px dashed var(--line)}
+  .tsitem:last-child{border-bottom:none}
+  .ts-date{min-width:92px;flex-shrink:0;font-size:11.5px;color:var(--txt-3);padding-top:2px}
+  .ts-date .ts-typ{display:inline-block;margin-top:5px;font-size:9.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;padding:2px 7px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line)}
+  .ts-body{flex:1;min-width:0}
+  .ts-prob{font-size:14px;font-weight:700}
+  .ts-sol{font-size:13px;color:var(--txt-2);margin-top:4px;line-height:1.55}
+  .ts-sol b{color:var(--txt-2);font-weight:700}
+  .ts-outcome{display:inline-flex;align-items:center;gap:6px;margin-top:9px;font-size:11px;font-weight:700;padding:3px 11px;border-radius:999px}
+  .ts-outcome i{width:6px;height:6px;border-radius:50%;background:currentColor;display:block}
+  .oc-helped{background:rgba(52,211,153,.14);color:var(--ok);border:1px solid rgba(52,211,153,.35)}
+  .oc-partial{background:rgba(251,191,36,.14);color:var(--warn);border:1px solid rgba(251,191,36,.35)}
+  .oc-did_not_help{background:rgba(251,113,133,.14);color:var(--bad);border:1px solid rgba(251,113,133,.35)}
+  .oc-not_implemented,.oc-unclear{background:var(--surface-2);color:var(--txt-3);border:1px solid var(--line)}
+  .ts-note{font-size:12px;color:var(--txt-3);margin-top:6px}
   .ov-countbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
   .ov-count{font-size:11.5px;color:var(--txt-2);background:var(--surface-2);border:1px solid var(--line);padding:4px 11px;border-radius:999px}
 
@@ -1384,15 +1401,23 @@ function storyCard(cls, tag, label, text){
     <p>${esc(text)}</p>
   </div>`;
 }
+function tsOutcome(o){
+  return {helped:['Helped','oc-helped'], partial:['Partly helped','oc-partial'],
+          did_not_help:["Didn't help",'oc-did_not_help'], not_implemented:['Not implemented','oc-not_implemented'],
+          unclear:['Unclear','oc-unclear']}[o] || ['Unclear','oc-unclear'];
+}
 function renderOverviewCard(wrap, data){
   const em = data.escalations_meta || {}; const c = em.counts || {};
-  const countbar = (em.available)
-    ? `<div class="ov-countbar">
-         <span class="ov-count">🗓 last ${esc(em.window_days||30)}d</span>
-         <span class="ov-count">📞 ${c.calls||0} calls</span>
-         <span class="ov-count">💬 ${c.chats||0} chat msgs</span>
-         <span class="ov-count">🚨 ${c.sos||0} escalations</span>
-       </div>` : '';
+  const tm = data.troubleshoot_meta || {};
+  const counts = [];
+  if(em.available){
+    counts.push(`<span class="ov-count">🗓 last ${esc(em.window_days||30)}d</span>`,
+      `<span class="ov-count">📞 ${c.calls||0} calls</span>`,
+      `<span class="ov-count">💬 ${c.chats||0} chat msgs</span>`,
+      `<span class="ov-count">🚨 ${c.sos||0} escalations</span>`);
+  }
+  if(tm.available) counts.push(`<span class="ov-count">🛠 ${tm.count||0} past troubleshoots</span>`);
+  const countbar = counts.length ? `<div class="ov-countbar">${counts.join('')}</div>` : '';
   const stats = (data.spend_orders||[]).map(ovStat).join('');
   const funnel = (data.funnel||[]).map(funnelStage).join('');
   const timeline = (data.what_happened||[]).length
@@ -1409,6 +1434,19 @@ function renderOverviewCard(wrap, data){
   const story = storyCards
     ? `<div class="ov-sec-h"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/></svg> Account story — every angle</div>
        <div class="story-grid">${storyCards}</div>` : '';
+  const tsl = data.troubleshoot_lens || [];
+  const tslens = tsl.length
+    ? `<div class="ov-sec-h"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.3L3 18l3 3 6.4-6.3a4 4 0 0 0 5.3-5.4l-2.8 2.8-2.1-2.1 2.9-2.7Z"/></svg> Troubleshoot lens — what we did &amp; did it land</div>
+       <div class="tslens">${tsl.map(t=>{const [lbl,cls]=tsOutcome(t.outcome);return `
+         <div class="tsitem">
+           <div class="ts-date">${esc(t.date||'')}${t.ts_type?`<span class="ts-typ">${esc(String(t.ts_type).replace('_ts','').replace('_',' '))}</span>`:''}</div>
+           <div class="ts-body">
+             <div class="ts-prob">${esc(t.problem||'')}</div>
+             ${t.solution?`<div class="ts-sol"><b>We did:</b> ${esc(t.solution)}</div>`:''}
+             <span class="ts-outcome ${cls}"><i></i>${lbl}</span>
+             ${t.note?`<div class="ts-note">${esc(t.note)}</div>`:''}
+           </div>
+         </div>`}).join('')}</div>` : '';
   const issues = (data.key_issues||[]).length
     ? `<div class="ov-sec-h"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg> Key issues</div>
        <ol class="ov-issues">${data.key_issues.map(x=>`<li>${esc(x)}</li>`).join('')}</ol>` : '';
@@ -1427,6 +1465,7 @@ function renderOverviewCard(wrap, data){
     ${funnel?`<div class="ov-sec-h"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M3 4h18M6 4v4l4 4v7l4-2v-5l4-4V4"/></svg> Funnel — where it breaks</div><div class="funnel">${funnel}</div>`:''}
     ${timeline}
     ${story}
+    ${tslens}
     ${issues}
     <div class="source-note">
       <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
@@ -1458,6 +1497,15 @@ function exportOverview(){
   const angles = [['Seller',st.seller_side],['Seller requests',st.seller_requests],['GC side',st.gc_side],['KAM side',st.kam_side],['Escalations',st.escalations]].filter(a=>a[1]&&String(a[1]).trim());
   if(angles.length){ L.push(line); L.push('ACCOUNT STORY — EVERY ANGLE'); L.push(line);
     angles.forEach(a=>{ L.push('  '+a[0].toUpperCase()+':'); (a[1].match(/.{1,84}(\s|$)/g)||[a[1]]).forEach(w=>L.push('     '+w.trim())); L.push(''); }); }
+  if((ov.troubleshoot_lens||[]).length){ L.push(line); L.push('TROUBLESHOOT LENS — WHAT WE DID & DID IT LAND'); L.push(line);
+    const OUT={helped:'HELPED',partial:'PARTLY HELPED',did_not_help:"DIDN'T HELP",not_implemented:'NOT IMPLEMENTED',unclear:'UNCLEAR'};
+    ov.troubleshoot_lens.forEach(t=>{
+      L.push('  ['+(t.date||'')+(t.ts_type?(' · '+t.ts_type):'')+']  ['+(OUT[t.outcome]||'UNCLEAR')+']');
+      if(t.problem){ L.push('     Problem : '+t.problem); }
+      if(t.solution){ (('We did  : '+t.solution).match(/.{1,84}(\s|$)/g)||[]).forEach((w,ix)=>L.push('     '+(ix?'          '+w.trim():w.trim()))); }
+      if(t.note){ L.push('     Result  : '+t.note); }
+      L.push('');
+    }); }
   if((ov.key_issues||[]).length){ L.push(line); L.push('KEY ISSUES'); L.push(line);
     ov.key_issues.forEach((x,ix)=>L.push('  '+(ix+1)+'. '+x)); L.push(''); }
   L.push(line); L.push('Meta Account Troubleshoot');
@@ -1729,7 +1777,13 @@ function mockOverview(seller, mode, inputs){
       canc>5?`Cancellation at ${canc}% (above 5%) is eroding delivered-order profit.`:'Watch efficiency: CPM rose as budget increased.',
       'Trust/communication gap: paused campaigns + missed callbacks drove a seller escalation.',
     ],
+    troubleshoot_lens: [
+      {date:'2026-06-27', ts_type:'manual_ts', problem:'Seller-side cancellations well above the 5% ceiling', solution:'Educated the seller to stop cancelling orders; flagged the worst SKUs to fix or delist', outcome:canc>5?'did_not_help':'helped', note:canc>5?`Cancellation is still ${canc}% weeks later — the same action recurred across troubleshoots without the number falling.`:'Cancellation is back within the healthy band.'},
+      {date:'2026-06-13', ts_type:'manual_ts', problem:'Low product-quality score dragging reach/ranking', solution:'Asked seller to improve PQ (photos, catalogue hygiene, tagging)', outcome:'partial', note:'PQ ticked up slightly but stayed below the 2.75 target in the last 15 days.'},
+      {date:'2026-05-30', ts_type:'manual_ts', problem:'Orders stuck in processing (PPH) beyond 2 days', solution:'Asked seller to clear the PPH backlog and disable low-performing widgets', outcome:'unclear', note:'No later PPH data in this window to confirm whether the backlog cleared.'},
+    ],
     escalations_meta: { window_days:30, available:true, counts:{calls:6, chats:altSeed(seller), sos:canc>5?3:0} },
+    troubleshoot_meta: { available:true, count:3 },
   }),700));
 }
 function altSeed(s){ return 20 + (((s&&s.seller_id)||'x').length*7)%40; }
