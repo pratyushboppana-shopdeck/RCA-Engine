@@ -365,6 +365,26 @@
   .oc-did_not_help{background:rgba(251,113,133,.14);color:var(--bad);border:1px solid rgba(251,113,133,.35)}
   .oc-not_implemented,.oc-unclear{background:var(--surface-2);color:var(--txt-3);border:1px solid var(--line)}
   .ts-note{font-size:12px;color:var(--txt-3);margin-top:6px}
+  /* week-wise progress */
+  .weeks{display:flex;flex-direction:column;gap:10px}
+  .week{border:1px solid var(--line);border-radius:var(--r);background:var(--bg);padding:13px 15px}
+  .week-h{font-size:13px;font-weight:700;color:var(--txt)}
+  .week-row{display:flex;gap:10px;font-size:12.5px;line-height:1.55;margin-top:7px}
+  .week-row .wk-k{flex-shrink:0;width:92px;color:var(--txt-3);font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;padding-top:2px}
+  .week-row .wk-v{color:var(--txt-2)}
+  .week-row.sos .wk-v{color:var(--bad)}
+  .week-row.ts .wk-v{color:#a5b4fc}
+  /* cache popup modal */
+  .modal-ov{position:fixed;inset:0;background:rgba(5,7,14,.62);backdrop-filter:blur(3px);display:grid;place-items:center;z-index:1000;padding:20px;animation:rise .2s var(--ease) both}
+  .modal-card{background:linear-gradient(180deg,var(--surface),var(--bg));border:1px solid var(--line-strong);border-radius:var(--r-lg);padding:24px;max-width:440px;width:100%;box-shadow:var(--shadow)}
+  .modal-card h3{font-size:17px;margin-bottom:9px;display:flex;align-items:center;gap:9px}
+  .modal-card h3 .icon{color:#a5b4fc}
+  .modal-card p{font-size:13.5px;color:var(--txt-2);line-height:1.6;margin-bottom:18px}
+  .modal-actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
+  .modal-btn{font:inherit;font-size:13.5px;font-weight:600;padding:10px 16px;border-radius:10px;cursor:pointer;border:1px solid var(--line-strong);background:var(--surface-2);color:var(--txt);transition:var(--fast)}
+  .modal-btn:hover{border-color:var(--line-strong);background:var(--surface-3)}
+  .modal-btn.primary{background:linear-gradient(135deg,var(--ok),#10b981);border:none;color:#04150e;box-shadow:0 10px 22px -12px rgba(52,211,153,.7)}
+  .modal-btn.primary:hover{filter:brightness(1.06)}
   .ov-countbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
   .ov-count{font-size:11.5px;color:var(--txt-2);background:var(--surface-2);border:1px solid var(--line);padding:4px 11px;border-radius:999px}
 
@@ -1349,9 +1369,57 @@ async function generatePlan(){
 }
 
 /* ---------- Account Overview / RCA ---------- */
+/* Popup shown when a fresh (<5-day) RCA already exists for this seller — reuse it (free) or regenerate.
+   Resolves to 'saved' | 'regen' | 'cancel'. */
+function rcaCachePopup(ageDays, when){
+  return new Promise(resolve=>{
+    const ageTxt = ageDays==null ? 'recently'
+      : (ageDays < 1 ? 'earlier today' : (Math.round(ageDays) + ' day' + (Math.round(ageDays)>=2?'s':'') + ' ago'));
+    const ov = document.createElement('div'); ov.className = 'modal-ov';
+    ov.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true">
+      <h3><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 2a5 5 0 0 0-5 5v1a4 4 0 0 0-1 7 4 4 0 0 0 6 3 4 4 0 0 0 6-3 4 4 0 0 0-1-7V7a5 5 0 0 0-5-5Z"/></svg> Saved RCA found</h3>
+      <p>An account overview for <b>${esc((STATE.seller&&STATE.seller.company)||'this seller')}</b> was already generated <b>${esc(ageTxt)}</b>${when?` (${esc(when)})`:''}. Reuse it for free, or regenerate a fresh one (uses AI budget)?</p>
+      <div class="modal-actions">
+        <button class="modal-btn" data-a="cancel">Cancel</button>
+        <button class="modal-btn" data-a="regen">Regenerate</button>
+        <button class="modal-btn primary" data-a="saved">Use saved (free)</button>
+      </div></div>`;
+    const done=(a)=>{ if(ov.parentNode) document.body.removeChild(ov); resolve(a); };
+    ov.addEventListener('click', e=>{
+      const a = e.target.getAttribute && e.target.getAttribute('data-a');
+      if(a) done(a); else if(e.target===ov) done('cancel');
+    });
+    document.body.appendChild(ov);
+  });
+}
+
 async function generateOverview(){
   const i = STATE.inputs || {};
   if(!(i.meta && i.pnl)){ updateGate(); return; }
+  const sid = (STATE.seller && STATE.seller.seller_id) || '';
+  // Cache peek: if a fresh RCA already exists for this seller, offer to reuse it (no AI cost).
+  if(API_BASE && sid){
+    try{
+      const j = await (await fetch(API_BASE+'/api/overview_cache?seller_id='+encodeURIComponent(sid),{cache:'no-store'})).json();
+      if(j && j.cached && j.data){
+        const choice = await rcaCachePopup(j.age_days, j.generated_at);
+        if(choice==='cancel') return;
+        if(choice==='saved'){
+          const wrap = document.getElementById('overview');
+          STATE.lastOverview = j.data;
+          renderOverviewCard(wrap, j.data);
+          wrap.scrollIntoView({behavior:'smooth',block:'nearest'});
+          return;
+        }
+        return runOverview(true);   // regenerate
+      }
+    }catch(e){ /* peek failed — just generate */ }
+  }
+  return runOverview(false);
+}
+
+async function runOverview(force){
+  const i = STATE.inputs || {};
   const wrap = document.getElementById('overview');
   const prog = (msg)=>{ wrap.innerHTML = `<div class="card reveal"><div class="empty"><span class="spin" style="display:inline-block;vertical-align:middle"></span> &nbsp;${esc(msg)}</div></div>`; };
   wrap.scrollIntoView({behavior:'smooth',block:'nearest'});
@@ -1359,11 +1427,11 @@ async function generateOverview(){
   try{
     if(!API_BASE){ prog('Building account overview…'); data = await mockOverview(STATE.seller, STATE.mode, i); }
     else {
-      prog('Claude is reconstructing what happened in the account (spend, funnel, calls & escalations)…');
+      prog(force ? 'Regenerating a fresh account overview…' : 'Claude is reconstructing what happened in the account (spend, funnel, calls, escalations & troubleshoots)…');
       const r = await fetch(API_BASE+'/api/overview',{method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({ seller:STATE.seller, mode:STATE.mode,
           pnl_csv:i.pnl?i.pnl.content:'', meta_csv:i.meta?i.meta.content:'',
-          extra_csv:(i.extra||[]).map(f=>({name:f.name,content:f.content})) })});
+          extra_csv:(i.extra||[]).map(f=>({name:f.name,content:f.content})), force:!!force })});
       if(!r.ok){ const e = await r.json().catch(()=>({})); throw new Error(e.detail||('API '+r.status)); }
       data = await r.json();
     }
@@ -1447,17 +1515,31 @@ function renderOverviewCard(wrap, data){
              ${t.note?`<div class="ts-note">${esc(t.note)}</div>`:''}
            </div>
          </div>`}).join('')}</div>` : '';
+  const wp = data.weekly_progress || [];
+  const weeks = wp.length
+    ? `<div class="ov-sec-h"><svg class="icon icon-sm" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg> Week-wise progress</div>
+       <div class="weeks">${wp.map(w=>{
+         const row=(k,label,cls)=> (w[k]&&String(w[k]).trim()) ? `<div class="week-row ${cls||''}"><span class="wk-k">${label}</span><span class="wk-v">${esc(w[k])}</span></div>` : '';
+         return `<div class="week"><div class="week-h">${esc(w.week||'')}</div>
+           ${row('progress','Progress')}${row('communication','Comms')}${row('issues','Issues')}${row('sos','SOS','sos')}${row('troubleshoot','Troubleshoot','ts')}</div>`;
+       }).join('')}</div>` : '';
   const issues = (data.key_issues||[]).length
     ? `<div class="ov-sec-h"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg> Key issues</div>
        <ol class="ov-issues">${data.key_issues.map(x=>`<li>${esc(x)}</li>`).join('')}</ol>` : '';
+  const weeklyBtn = wp.length ? `<button class="btn-export" onclick="exportWeekly()">
+        <svg class="icon icon-sm" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
+        Week-wise (.txt)</button>` : '';
   wrap.innerHTML = `
   <div class="card reveal">
     <div class="plan-head">
       <div class="label" style="margin:0"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg> Account overview / RCA</div>
-      <button class="btn-export" onclick="exportOverview()">
-        <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
-        Export (.txt)
-      </button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${weeklyBtn}
+        <button class="btn-export" onclick="exportOverview()">
+          <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+          Export (.txt)
+        </button>
+      </div>
     </div>
     ${countbar}
     ${data.headline?`<div class="ov-headline">${esc(data.headline)}</div>`:''}
@@ -1466,10 +1548,11 @@ function renderOverviewCard(wrap, data){
     ${timeline}
     ${story}
     ${tslens}
+    ${weeks}
     ${issues}
     <div class="source-note">
       <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
-      ${API_BASE?('Generated live by Claude'+(em.available?' · calls/chats/escalations from card 9293':' · escalation data unavailable, funnel from CSV')):'Sample overview — connect backend for live AI'}
+      ${API_BASE?((data.cached?('♻︎ Reused a saved RCA'+(data.generated_at?' from '+esc(data.generated_at):'')+' (no AI cost)'):'Generated live by Claude')+(em.available?' · calls/chats/escalations from card 9293':'')+(data.troubleshoot_meta&&data.troubleshoot_meta.available?' · troubleshoots from card 11834':'')):'Sample overview — connect backend for live AI'}
     </div>
   </div>`;
 }
@@ -1513,6 +1596,35 @@ function exportOverview(){
   const url = URL.createObjectURL(blob); const a = document.createElement('a');
   const safe = (d.company || d.seller_id || 'seller').toString().replace(/[^a-z0-9]+/gi,'_').slice(0,40);
   a.href = url; a.download = 'account_overview_' + safe + '.txt';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 2000);
+}
+
+function exportWeekly(){
+  const d = STATE.seller || {}, ov = STATE.lastOverview;
+  if(!ov || !(ov.weekly_progress||[]).length) return;
+  const line = '='.repeat(64); const L = [];
+  L.push('WEEK-WISE PROGRESS REPORT'); L.push(line);
+  L.push('Company     : ' + (d.company || '-'));
+  L.push('Seller ID   : ' + (d.seller_id || '-'));
+  L.push('Track       : ' + (STATE.mode==='hits'?'HITS Troubleshoot':'1k-5k Troubleshoot'));
+  L.push('Generated   : ' + new Date().toLocaleString());
+  L.push('');
+  const seg=(label,v)=>{ if(v&&String(v).trim()){ L.push('  '+label+':'); (String(v).match(/.{1,80}(\s|$)/g)||[v]).forEach(x=>L.push('     '+x.trim())); } };
+  ov.weekly_progress.forEach(w=>{
+    L.push(line); L.push(String(w.week||'').toUpperCase()); L.push(line);
+    seg('Progress', w.progress);
+    seg('Communication', w.communication);
+    seg('Issues', w.issues);
+    seg('SOS / escalations', w.sos);
+    seg('Troubleshoot actions', w.troubleshoot);
+    L.push('');
+  });
+  L.push(line); L.push('Meta Account Troubleshoot');
+  const blob = new Blob([L.join('\n')], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob); const a = document.createElement('a');
+  const safe = (d.company || d.seller_id || 'seller').toString().replace(/[^a-z0-9]+/gi,'_').slice(0,40);
+  a.href = url; a.download = 'weekwise_progress_' + safe + '.txt';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url), 2000);
 }
@@ -1782,8 +1894,15 @@ function mockOverview(seller, mode, inputs){
       {date:'2026-06-13', ts_type:'manual_ts', problem:'Low product-quality score dragging reach/ranking', solution:'Asked seller to improve PQ (photos, catalogue hygiene, tagging)', outcome:'partial', note:'PQ ticked up slightly but stayed below the 2.75 target in the last 15 days.'},
       {date:'2026-05-30', ts_type:'manual_ts', problem:'Orders stuck in processing (PPH) beyond 2 days', solution:'Asked seller to clear the PPH backlog and disable low-performing widgets', outcome:'unclear', note:'No later PPH data in this window to confirm whether the backlog cleared.'},
     ],
+    weekly_progress: [
+      {week:'2026-W25 (16–22 Jun)', communication:'GC intro call; seller asked to revive paused campaigns.', issues:'Campaigns paused, spend near zero early in the week.', sos:'', troubleshoot:'Improve PQ (product quality).', progress:'Spend restarted mid-week; orders flat.'},
+      {week:'2026-W26 (23–29 Jun)', communication:'Multiple seller chats chasing callbacks.', issues:`Cancellation elevated (~${canc}%); CTR slipping.`, sos:canc>5?'1 leadership escalation on unresponsive callbacks.':'', troubleshoot:'Improve PQ (repeat).', progress:'CPM steady, CTR down — efficiency worsening.'},
+      {week:'2026-W27 (30 Jun–6 Jul)', communication:'KAM handled combo-listing queries.', issues:'P&L turned more negative as spend rose.', sos:'', troubleshoot:'Reduce cancellation; clear PPH backlog.', progress:'Spend up ~5%, GMV flat — margin fell to ~-20%.'},
+      {week:'2026-W28 (7–13 Jul)', communication:'Seller frustrated, POC change to new GC.', issues:`Cancellation still high (~${canc}%); delivery/RTO bleeding.`, sos:canc>5?'Escalation to reassign the account.':'', troubleshoot:'Educate seller on cancellation (still open).', progress:'Margin worsened to ~-50%; the leak is post-click, not reach.'},
+    ],
     escalations_meta: { window_days:30, available:true, counts:{calls:6, chats:altSeed(seller), sos:canc>5?3:0} },
     troubleshoot_meta: { available:true, count:3 },
+    cached:false, generated_at:'just now (sample)',
   }),700));
 }
 function altSeed(s){ return 20 + (((s&&s.seller_id)||'x').length*7)%40; }

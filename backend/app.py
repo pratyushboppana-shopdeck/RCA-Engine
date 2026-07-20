@@ -872,6 +872,7 @@ class OverviewReq(BaseModel):
     meta_csv: str = ""              # Meta ad-account metrics export (CSV text) — required
     extra_csv: list[CsvFile] = []   # optional additional CSVs
     window_days: int = 0            # escalation lookback (0 -> ESCALATION_WINDOW_DAYS)
+    force: bool = False             # True = regenerate even if a fresh cached RCA exists
 
 
 _INDEX_PATHS = [
@@ -1698,6 +1699,11 @@ OVERVIEW_SCHEMA = {
         "what_happened": {"type": "array", "items": {"type": "string"},
                           "description": "chronological bullet points of the key events in the account (money + comms)"},
         "account_story": {"$ref": "#/$defs/story"},
+        "weekly_progress": {"type": "array", "items": {"$ref": "#/$defs/week"},
+                            "description": "CHRONOLOGICAL (oldest week first) week-by-week progress of the account: "
+                                           "what happened each week across communication, issues, SOS/escalations, "
+                                           "troubleshoot actions, and metrics/spend progress. Only include weeks that "
+                                           "have some activity in the provided data."},
         "troubleshoot_lens": {"type": "array", "items": {"$ref": "#/$defs/ts_item"},
                               "description": "per PAST troubleshoot workflow (most recent first): the problem it "
                                              "identified, the solution/action given, and whether later data shows it "
@@ -1738,8 +1744,71 @@ OVERVIEW_SCHEMA = {
                                        "in a later TS) shows it worked"},
             "note": {"type": "string", "description": "1 sentence of evidence for the outcome, grounded in a number/trend"}},
             "required": ["date", "problem", "solution", "outcome"]},
+        "week": {"type": "object", "properties": {
+            "week": {"type": "string", "description": "week label + date range, e.g. '2026-W25 (16–22 Jun)'"},
+            "communication": {"type": "string", "description": "key calls/chats that week — who reached out, what about"},
+            "issues": {"type": "string", "description": "problems/red flags that surfaced that week"},
+            "sos": {"type": "string", "description": "SOS / leadership escalations raised that week (empty if none)"},
+            "troubleshoot": {"type": "string", "description": "troubleshoot actions/solutions given that week (empty if none)"},
+            "progress": {"type": "string", "description": "metrics/spend/P&L movement and net progress that week"}},
+            "required": ["week"]},
     },
 }
+
+
+# ---- team-shared RCA cache (Upstash) — reuse a recent overview instead of re-spending AI budget ----
+RCA_CACHE_DAYS = int(os.environ.get("RCA_CACHE_DAYS", "5"))
+
+
+def _iso(ts):
+    return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(ts)) if ts else ""
+
+
+def _rca_cache_get(seller_id):
+    """Most recent cached RCA for a seller if within RCA_CACHE_DAYS, else None. Team-shared via Upstash;
+    None if Upstash isn't configured. Adds age_days + generated_at."""
+    sid = str(seller_id or "").strip()
+    if not sid or not (UPSTASH_URL and UPSTASH_TOKEN):
+        return None
+    try:
+        raw = _redis(["GET", "rca:" + sid])
+        if not raw:
+            return None
+        obj = json.loads(raw)
+        age = time.time() - obj.get("ts", 0)
+        if age > RCA_CACHE_DAYS * 86400:
+            return None
+        obj["age_days"] = round(age / 86400, 1)
+        obj["generated_at"] = _iso(obj.get("ts", 0))
+        return obj
+    except Exception:
+        return None
+
+
+def _rca_cache_set(seller_id, data):
+    """Store an RCA (keyed by seller_id only) with a RCA_CACHE_DAYS TTL. No-op without Upstash."""
+    sid = str(seller_id or "").strip()
+    if not sid or not (UPSTASH_URL and UPSTASH_TOKEN):
+        return
+    try:
+        _redis(["SET", "rca:" + sid, json.dumps({"ts": time.time(), "data": data})])
+        _redis(["EXPIRE", "rca:" + sid, str(RCA_CACHE_DAYS * 86400)])
+    except Exception:
+        pass
+
+
+@app.get("/api/overview_cache")
+def overview_cache(seller_id: str = ""):
+    """Peek the RCA cache for the popup: is there a fresh (<RCA_CACHE_DAYS) saved overview for this seller?
+    Returns the cached data too, so 'use saved' needs no extra AI call."""
+    sid = (seller_id or "").strip()
+    if not (UPSTASH_URL and UPSTASH_TOKEN):
+        return {"available": False, "cached": False}
+    c = _rca_cache_get(sid) if sid else None
+    if not c or not c.get("data"):
+        return {"available": True, "cached": False}
+    return {"available": True, "cached": True, "age_days": c.get("age_days"),
+            "generated_at": c.get("generated_at"), "data": c["data"]}
 
 
 def _overview_data_block(req, esc, ts):
@@ -1766,6 +1835,15 @@ def overview(req: OverviewReq):
     if not (req.pnl_csv or "").strip() or not (req.meta_csv or "").strip():
         raise HTTPException(400, "Both a P&L CSV and a Meta ad-account metrics CSV are required")
     sid = str((req.seller or {}).get("seller_id") or "").strip()
+    # Reuse a recent team-shared RCA instead of spending AI budget again (unless force=True).
+    if sid and not req.force:
+        cached = _rca_cache_get(sid)
+        if cached and cached.get("data"):
+            out = dict(cached["data"])
+            out["cached"] = True
+            out["generated_at"] = cached.get("generated_at")
+            out["age_days"] = cached.get("age_days")
+            return out
     days = req.window_days or ESCALATION_WINDOW_DAYS
     esc = _safe_call(_get_escalations, sid, days, default={}) if sid else {}
     tsh = _safe_call(_get_troubleshoots, sid, default=[]) if sid else []
@@ -1802,24 +1880,33 @@ def overview(req: OverviewReq):
         "troubleshoots (e.g. 'reduce cancellation' flagged repeatedly with the % not falling) it 'did_not_help' or "
         "was 'not_implemented'; if the metric improved after, 'helped'; if you cannot tell, 'unclear'. Cite the "
         "number/trend in 'note'. This is how we show what WE did and whether it landed.\n"
-        "6) KEY ISSUES ('key_issues'): the main problems, most important first, each grounded in a number or event.\n\n"
+        "6) WEEKLY PROGRESS ('weekly_progress'): a CHRONOLOGICAL (oldest week first) week-by-week log. Use the "
+        "dates on the communications, SOS, troubleshoots, daily_metrics and weekly P&L to place each event in its "
+        "week. For each week give a short line for: communication (calls/chats), issues (red flags that surfaced), "
+        "sos (escalations raised), troubleshoot (actions given that week), and progress (spend/orders/P&L movement "
+        "and whether things got better or worse). Leave a field '' if nothing happened there. Only include weeks "
+        "that actually have activity.\n"
+        "7) KEY ISSUES ('key_issues'): the main problems, most important first, each grounded in a number or event.\n\n"
         "KEEP IT TIGHT (this must finish well within a time budget): at most 7 spend_orders, 6 funnel stages, "
-        "7 what_happened bullets, 8 troubleshoot_lens items, and 5 key_issues; one or two short sentences per "
-        "read/story/note field. Prioritise the most important items rather than being exhaustive."
+        "7 what_happened bullets, 8 troubleshoot_lens items, 8 weekly_progress weeks, and 5 key_issues; short "
+        "phrases (not paragraphs) per weekly field. Prioritise the most important items rather than being exhaustive."
     )
     user = f"Seller track: {track}.\n\n" + _overview_data_block(req, esc, tsh)
     client = _anthropic()
     # Output is bounded by the "KEEP IT TIGHT" caps in the prompt so all sections fit and the single
     # call stays well under Vercel's 120s limit.
-    out = _tool_call(client, sysp, user, OVERVIEW_SCHEMA, max_tokens=6000, tool="submit", model=OVERVIEW_MODEL)
+    out = _tool_call(client, sysp, user, OVERVIEW_SCHEMA, max_tokens=8000, tool="submit", model=OVERVIEW_MODEL)
     # defensive caps so a runaway never reaches the UI
-    for k in ("spend_orders", "funnel", "what_happened", "troubleshoot_lens", "key_issues"):
+    for k in ("spend_orders", "funnel", "what_happened", "troubleshoot_lens", "weekly_progress", "key_issues"):
         if isinstance(out.get(k), list):
-            out[k] = out[k][:12]
+            out[k] = out[k][:16]
     out["escalations_meta"] = {"window_days": days,
                                "counts": (esc or {}).get("counts", {}),
                                "available": bool(esc)}
     out["troubleshoot_meta"] = {"count": len(tsh), "available": bool(tsh)}
+    out["cached"] = False
+    out["generated_at"] = _iso(time.time())
+    _rca_cache_set(sid, out)   # store for team-wide reuse within RCA_CACHE_DAYS
     return out
 
 
