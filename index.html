@@ -1406,8 +1406,9 @@ async function generateOverview(){
         if(choice==='cancel') return;
         if(choice==='saved'){
           const wrap = document.getElementById('overview');
-          STATE.lastOverview = j.data;
-          renderOverviewCard(wrap, j.data);
+          const data = Object.assign({}, j.data, {cached:true, generated_at:j.generated_at, age_days:j.age_days});
+          STATE.lastOverview = data;
+          renderOverviewCard(wrap, data);
           wrap.scrollIntoView({behavior:'smooth',block:'nearest'});
           return;
         }
